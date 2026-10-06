@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { readFile, readdir, unlink } from "node:fs/promises";
 import path from "node:path";
 import { unzipSync } from "fflate";
-import type { ConversionResult, ResizeOptions } from "../lib/types";
+import type { ConversionResult, OutputFormat, ResizeOptions } from "../lib/types";
 
 const base = process.env.TEST_BASE_URL ?? "http://127.0.0.1:3000";
 const output = path.resolve(process.env.TEST_OUTPUT_DIR ?? "data/output");
@@ -31,14 +31,16 @@ async function request(url: string, init?: RequestInit) {
 type Input = { name: string; mime: string; data: Buffer };
 type Result = ConversionResult;
 async function json<T>(response: Response) { const body = await response.json(); assert.ok(response.ok, JSON.stringify(body)); return body as T; }
-async function batch(inputs: Input[], lossless = false, resize?: ResizeOptions) {
-  return json<{ batchId: string; fileIds: string[] }>(await request(`${base}/api/batches`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files: inputs.map(f => ({ name: f.name, size: f.data.length, mime: f.mime })), quality: 80, lossless, resize }) }));
+async function batch(inputs: Input[], lossless = false, resize?: ResizeOptions, outputFormat?: OutputFormat) {
+  return json<{ batchId: string; fileIds: string[] }>(await request(`${base}/api/batches`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files: inputs.map(f => ({ name: f.name, size: f.data.length, mime: f.mime })), quality: 80, lossless, resize, outputFormat }) }));
 }
 async function convert(id: string, fileId: string, input: Input) {
   return request(`${base}/api/convert?batch=${id}&id=${fileId}`, { method: "POST", headers: { "Content-Type": input.mime }, body: new Uint8Array(input.data) });
 }
 async function download(batchId: string, id: string) {
   const response = await request(`${base}/api/download?batch=${batchId}&id=${id}`); assert.equal(response.status, 200);
+  const name = response.headers.get("content-disposition")!;
+  assert.equal(response.headers.get("content-type"), name.endsWith('.png"') ? "image/png" : /\.jpe?g"$/.test(name) ? "image/jpeg" : "image/webp");
   return Buffer.from(await response.arrayBuffer());
 }
 async function verifyOutput(result: Result, data: Buffer) {
@@ -46,7 +48,7 @@ async function verifyOutput(result: Result, data: Buffer) {
   assert.equal(result.outputSize, data.length);
   assert.deepEqual(await readFile(path.join(output, result.filename)), data);
   const metadata = await sharp(data).metadata();
-  assert.equal(metadata.format, "webp");
+  assert.equal(metadata.format, result.format);
   assert.equal(result.width, metadata.width); assert.equal(result.height, metadata.height);
 }
 try {
@@ -61,6 +63,7 @@ try {
   const first = await batch([jpg, png], true);
   const pendingZip = await request(`${base}/api/zip?batch=${first.batchId}`); assert.equal(pendingZip.status, 404);
   const results = await Promise.all([jpg, png].map(async (input, index) => json<Result>(await convert(first.batchId, first.fileIds[index], input))));
+  assert.ok(results.every(result => result.format === "webp"), "Default conversion remains WebP");
   for (const result of results) await verifyOutput(result, await download(first.batchId, result.id));
   assert.deepEqual([results[0].width, results[0].height], [160, 100], "Resize is off by default");
   const webpPixels = await sharp(await download(first.batchId, results[1].id)).ensureAlpha().raw().toBuffer();
@@ -130,12 +133,46 @@ try {
   const rotatedResult = await json<Result>(await convert(rotatedBatch.batchId, rotatedBatch.fileIds[0], oriented));
   await verifyOutput(rotatedResult, await download(rotatedBatch.batchId, rotatedResult.id));
   assert.deepEqual([rotatedResult.originalWidth, rotatedResult.originalHeight, rotatedResult.width, rotatedResult.height], [100, 160, 30, 48], "Resize must use displayed EXIF orientation");
+  const originalInputs = [{ ...jpg, name: `${prefix}-original.jpg` }, { ...jpg, name: `${prefix}-original.jpeg` }, { ...png, name: `${prefix}-original.png` }];
+  const originalBatch = await batch(originalInputs, false, { width: 40 }, "original");
+  const originalResults: Result[] = [];
+  for (const [index, input] of originalInputs.entries()) {
+    const result = await json<Result>(await convert(originalBatch.batchId, originalBatch.fileIds[index], input));
+    const data = await download(originalBatch.batchId, result.id); await verifyOutput(result, data); originalResults.push(result);
+    assert.equal(result.filename, input.name);
+    assert.equal(result.format, index === 2 ? "png" : "jpeg");
+    assert.deepEqual([result.width, result.height], index === 2 ? [40, 30] : [40, 25]);
+    if (index === 2) assert.ok((await sharp(data).stats()).channels[3].min < 255, "Original-format PNG must retain alpha");
+  }
+  const originalZip = await request(`${base}/api/zip?batch=${originalBatch.batchId}`); assert.equal(originalZip.status, 200);
+  const originalEntries = unzipSync(new Uint8Array(await originalZip.arrayBuffer()));
+  assert.deepEqual(Object.keys(originalEntries).sort(), originalResults.map(result => result.filename).sort());
+  for (const result of originalResults) assert.deepEqual(Buffer.from(originalEntries[result.filename]), await readFile(path.join(output, result.filename)));
+  const originalAgain = await batch(originalInputs, false, { width: 20 }, "original");
+  for (const [index, input] of originalInputs.entries()) {
+    const previous = await readFile(path.join(output, originalResults[index].filename));
+    const result = await json<Result>(await convert(originalAgain.batchId, originalAgain.fileIds[index], input));
+    await verifyOutput(result, await download(originalAgain.batchId, result.id));
+    assert.equal(result.filename, input.name.replace(/\.(jpg|jpeg|png)$/, "-1.$1"));
+    assert.deepEqual(await readFile(path.join(output, originalResults[index].filename)), previous);
+  }
+  const resizeWebp = await batch(originalInputs, false, { width: 40 }, "webp");
+  for (const [index, input] of originalInputs.entries()) {
+    const result = await json<Result>(await convert(resizeWebp.batchId, resizeWebp.fileIds[index], input));
+    await verifyOutput(result, await download(resizeWebp.batchId, result.id));
+    assert.equal(result.format, "webp"); assert.match(result.filename, /\.webp$/);
+    assert.deepEqual([result.width, result.height], index === 2 ? [40, 30] : [40, 25]);
+  }
+  for (const outputFormat of ["jpeg", "avif", "../png", null, 1]) {
+    const response = await request(`${base}/api/batches`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files: [{ name: jpg.name, mime: jpg.mime, size: jpg.data.length }], quality: 80, lossless: false, resize: { width: 40 }, outputFormat }) });
+    assert.equal(response.status, 400);
+  }
   for (const resize of [null, {}, [], { width: 0 }, { height: 1.5 }, { width: "40" }, { width: 16384 }, { height: -30 }]) {
     const response = await request(`${base}/api/batches`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files: [{ name: jpg.name, mime: jpg.mime, size: jpg.data.length }], quality: 80, lossless: false, resize }) });
     assert.equal(response.status, 400, `Invalid resize ${JSON.stringify(resize)} must be rejected before upload`);
   }
   assert.equal((await readdir(uploads)).filter(name => name.endsWith(".upload")).length, 0);
-  console.log("PASS: JPEG, alpha-preserving PNG, lossless, 100-image batch, conflicts, individual downloads, ZIP contents, corrupted/spoofed input, size/type validation, resize dimensions/bounds/no enlargement/EXIF/alpha/ZIP/validation, cross-site blocking, filesystem output, temporary cleanup.");
+  console.log("PASS: WebP conversion, original-format JPG/JPEG/PNG resize, resize-to-WebP, correct download MIME, mixed-format ZIP, alpha, lossless, 100-image batch, conflicts, invalid input/format/resize validation, EXIF, no enlargement, cross-site blocking, filesystem output, temporary cleanup.");
 } finally {
   for (const filename of saved) await unlink(path.join(output, filename)).catch(() => {});
 }

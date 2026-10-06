@@ -2,6 +2,7 @@ import path from "node:path";
 import { open, unlink } from "node:fs/promises";
 import { constants } from "node:fs";
 import { AppError } from "./errors";
+import type { OutputExtension } from "./types";
 
 export function validateInput(name: string, mime: string) {
   const extension = path.extname(name).toLowerCase();
@@ -17,10 +18,11 @@ export function safeBaseName(name: string) {
   return /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(safe) ? `image-${safe}` : safe;
 }
 /** O_EXCL reserves names atomically, including across simultaneous batches. */
-export async function reserveOutput(directory: string, originalName: string) {
+export async function reserveOutput(directory: string, originalName: string, extension: OutputExtension = "webp") {
+  if (!["webp", "jpg", "jpeg", "png"].includes(extension)) throw new AppError("Invalid output extension.");
   const base = safeBaseName(originalName);
   for (let i = 0; i < 10000; i++) {
-    const filename = `${base}${i ? `-${i}` : ""}.webp`;
+    const filename = `${base}${i ? `-${i}` : ""}.${extension}`;
     const filePath = path.join(directory, filename);
     try { return { filename, filePath, handle: await open(filePath, "wx", 0o644) }; }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
@@ -28,7 +30,7 @@ export async function reserveOutput(directory: string, originalName: string) {
   throw new AppError("Too many files share this name. Rename the image and try again.", 409);
 }
 export async function openOutput(directory: string, filename: string) {
-  if (path.basename(filename) !== filename || !/^[a-zA-Z0-9_-]+\.webp$/.test(filename)) throw new AppError("Invalid download filename.");
+  if (path.basename(filename) !== filename || !/^[a-zA-Z0-9_-]+\.(webp|jpe?g|png)$/.test(filename)) throw new AppError("Invalid download filename.");
   try {
     const handle = await open(path.join(directory, filename), constants.O_RDONLY | constants.O_NOFOLLOW);
     if (!(await handle.stat()).isFile()) { await handle.close(); throw new Error("Not a file"); }

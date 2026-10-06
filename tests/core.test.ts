@@ -82,3 +82,29 @@ test("batch validates resize settings and snapshots dimensions independently of 
   assert.deepEqual(batch.options.resize, { width: 16383, height: 1 });
   assert.equal(createBatch({ ...body, resize: { height: 600 } }).options.resize?.height, 600);
 });
+
+test("output selection defaults to WebP and requires valid dimensions for original format", () => {
+  const body = { files: [{ name: "photo.jpg", mime: "image/jpeg", size: 10 }], quality: 80, lossless: false };
+  assert.equal(createBatch(body).options.outputFormat, "webp");
+  assert.equal(createBatch({ ...body, outputFormat: "original", resize: { width: 100 } }).options.outputFormat, "original");
+  for (const outputFormat of ["jpg", "avif", "../png", null, 1, {}]) assert.throws(() => createBatch({ ...body, outputFormat, resize: { width: 100 } }), /output format/);
+  assert.throws(() => createBatch({ ...body, outputFormat: "original" }), /resize dimensions/);
+});
+
+test("original-format output reserves safe names and never overwrites matching input paths", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "forge-format-"));
+  try {
+    for (const extension of ["jpg", "jpeg", "png"] as const) {
+      await writeFile(path.join(directory, `photo.${extension}`), "original");
+      const output = await reserveOutput(directory, "../../photo.png", extension);
+      assert.equal(output.filename, `photo-1.${extension}`);
+      await output.handle.writeFile("resized"); await output.handle.close();
+      const handle = await openOutput(directory, output.filename);
+      assert.equal((await handle.readFile()).toString(), "resized"); await handle.close();
+      assert.equal((await readFile(path.join(directory, `photo.${extension}`))).toString(), "original");
+    }
+    for (const filename of ["../photo.png", "photo.svg", "photo.jpg/secret", "photo.png.exe"]) await assert.rejects(() => openOutput(directory, filename));
+    await symlink(path.join(directory, "photo.png"), path.join(directory, "linked.png"));
+    await assert.rejects(() => openOutput(directory, "linked.png"));
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});

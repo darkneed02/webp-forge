@@ -54,6 +54,17 @@ Implemented on `feature/image-resize` on 2026-10-06; resize is optional and disa
 - `docker compose build` was attempted but denied while writing Docker Buildx's activity file under `~/.docker/buildx/activity`. `docker compose ps` could read the daemon and reported the existing container healthy; that container predates this feature, so this is not verification of the new Docker image or resize through a bind mount. Rebuild from an unrestricted Terminal using the commands below before testing the feature at localhost.
 - No protected branch merge, release version bump, tag, or push was performed.
 
+## Tool selection and original-format resize flow
+
+Checked on `feature/image-resize` on 2026-10-06:
+
+- TypeScript, ESLint, all 15 unit tests, and the production Next.js build passed. Build output includes `/`, `/resize`, and `/convert`.
+- Server-rendered checks verify the two tool links, direct downloads with actual JPG/JPEG/PNG/WebP labels even after partial failure, mixed-format ZIP controls, and disabled downloads without successful outputs. These do not replace browser interaction checks.
+- In-process API acceptance passed for original-format JPG/JPEG/PNG resizing, actual decoded output format/dimensions, PNG alpha, correct download Content-Type, mixed-format ZIP bytes, conflict handling without overwrite, resize-to-WebP, unchanged default WebP conversion, invalid output format rejection, the 100-image resized WebP batch, and upload cleanup.
+- Browser tests now navigate from the chooser through both tools, verify original-format defaults and downloads, and resize to WebP. Attempting execution still failed at Chromium launch with macOS `bootstrap_check_in` permission denied. Browser interaction, screenshots, and theme/mobile checks remain unverified.
+- `docker compose build` again failed on a denied Buildx activity-file write, and production HTTP startup on port 3001 again failed with `EPERM`. The new flow has not been verified in a newly built Docker container or through its host bind mount.
+- This is a related follow-up on the existing resize feature branch. No protected branch merge, release version bump, tag, or push was performed.
+
 ## Remaining acceptance checks
 
 On a machine/session with Docker and browser access:

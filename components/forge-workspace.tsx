@@ -1,11 +1,13 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import type { ConversionOptions, ConversionResult, PublicConfig, ResizeOptions, SelectedImage } from "@/lib/types";
+import { useRouter } from "next/navigation";
+import type { ConversionOptions, ConversionResult, OutputFormat, PublicConfig, ResizeOptions, SelectedImage, TaskMode } from "@/lib/types";
 import { parseResizeOptions } from "@/lib/resize";
 import { DropZone } from "./drop-zone";
 import { ImageList } from "./image-list";
 import { QualitySelector, type Preset } from "./quality-selector";
 import { ResizeSettings, type ResizeSettingsValue } from "./resize-settings";
+import { OutputFormatSelector } from "./output-format-selector";
 import { ConversionProgress } from "./conversion-progress";
 import { ResultSummary } from "./result-summary";
 import { Button } from "./ui/button";
@@ -16,13 +18,16 @@ async function responseJson<T>(response: Response): Promise<T> {
   if (!response.ok) throw new Error(body.error || "The request failed. Try again.");
   return body as T;
 }
-export function ForgeWorkspace({ config }: { config: PublicConfig }) {
+export function ForgeWorkspace({ config, mode }: { config: PublicConfig; mode: TaskMode }) {
+  const router = useRouter();
+  const resizeMode = mode === "resize";
   const [images, setImages] = useState<SelectedImage[]>([]);
   const [options, setOptions] = useState<ConversionOptions>({ quality: config.quality, lossless: false });
   const [preset, setPreset] = useState<Preset>(config.quality === 80 ? "Balanced" : "Custom");
-  const [resize, setResize] = useState<ResizeSettingsValue>({ enabled: false, width: "1920", height: "" });
+  const [resize, setResize] = useState<ResizeSettingsValue>({ enabled: resizeMode, width: "1920", height: "" });
+  const [outputFormat, setOutputFormat] = useState<OutputFormat>(resizeMode ? "original" : "webp");
   let resizeOptions: ResizeOptions | undefined; let resizeError: string | undefined;
-  if (resize.enabled) {
+  if (resizeMode || resize.enabled) {
     try { resizeOptions = parseResizeOptions({ width: resize.width.trim() ? Number(resize.width) : undefined, height: resize.height.trim() ? Number(resize.height) : undefined }); }
     catch (error) { resizeError = error instanceof Error ? error.message : "Invalid resize settings."; }
   }
@@ -71,7 +76,7 @@ export function ForgeWorkspace({ config }: { config: PublicConfig }) {
     try {
       const batch = await responseJson<{ batchId: string; fileIds: string[] }>(await fetch("/api/batches", {
         method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
-        body: JSON.stringify({ ...options, resize: resizeOptions, files: images.map(image => ({ name: image.file.name, size: image.file.size, mime: image.file.type || (image.file.name.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg") })) })
+        body: JSON.stringify({ ...options, outputFormat, resize: resizeOptions, files: images.map(image => ({ name: image.file.name, size: image.file.size, mime: image.file.type || (image.file.name.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg") })) })
       }));
       setBatchId(batch.batchId);
       let next = 0;
@@ -108,18 +113,21 @@ export function ForgeWorkspace({ config }: { config: PublicConfig }) {
     finally { setDownloading(null); }
   }
   const completed = images.filter(image => image.status === "Completed" || image.status === "Failed").length;
+  const actionLabel = resizeMode ? outputFormat === "webp" ? "Resize & convert to WebP" : "Resize images" : "Convert to WebP";
   return <>
+    <div className="workspace-navigation"><Button variant="outline" disabled={busy || downloading !== null} onClick={() => router.push("/")}>← Choose another tool</Button><span>{resizeMode ? "RESIZE" : "WEBP CONVERSION"}</span></div>
     {error && <div className="error-banner" role="alert"><span>{error}</span><Button variant="ghost" size="icon" aria-label="Dismiss error" onClick={() => setError(null)}><Icon name="close" size={16} /></Button></div>}
     <div className="workspace-grid"><div className="main-column">
       <DropZone onFiles={addFiles} disabled={busy} maxFiles={config.maxFiles} maxUploadMB={config.maxUploadMB} />
       <ImageList images={images} disabled={busy || downloading !== null} onRemove={remove} onClear={() => remove()} onDownload={image => void download(image)} downloading={downloading} />
-      {(busy || finished) && <ConversionProgress completed={completed} total={images.length} busy={busy} />}
+      {(busy || finished) && <ConversionProgress completed={completed} total={images.length} busy={busy} mode={mode} />}
       <div className="privacy-note"><Icon name="shield" size={15} /><span>Processed locally. Your images stay on your machine.</span></div>
     </div><aside className="settings-column">
-      <QualitySelector preset={preset} options={options} onChange={(next, value) => { setPreset(next); setOptions(value); }} disabled={busy} />
-      <ResizeSettings value={resize} onChange={setResize} disabled={busy} error={resizeError} />
-      <Button className="convert-button" disabled={busy || !images.length || !!resizeError || downloading !== null} onClick={() => void convert()}><Icon name={busy ? "spinner" : "forge"} className={busy ? "spin" : undefined} />{busy ? "Converting…" : "Convert to WebP"}{!busy && images.length > 0 && <span>{images.length}</span>}{!busy && <Icon name="arrow" size={16} />}</Button>
-      {finished && <ResultSummary images={images} onDownload={image => void download(image)} downloading={downloading !== null} />}
+      {resizeMode && <OutputFormatSelector value={outputFormat} onChange={setOutputFormat} disabled={busy} />}
+      {outputFormat === "webp" && <QualitySelector preset={preset} options={options} onChange={(next, value) => { setPreset(next); setOptions(value); }} disabled={busy} />}
+      <ResizeSettings value={resize} onChange={setResize} disabled={busy} error={resizeError} required={resizeMode} />
+      <Button className="convert-button" disabled={busy || !images.length || !!resizeError || downloading !== null} onClick={() => void convert()}><Icon name={busy ? "spinner" : "forge"} className={busy ? "spin" : undefined} />{busy ? resizeMode ? "Processing…" : "Converting…" : actionLabel}{!busy && images.length > 0 && <span>{images.length}</span>}{!busy && <Icon name="arrow" size={16} />}</Button>
+      {finished && <ResultSummary images={images} onDownload={image => void download(image)} downloading={downloading !== null} mode={mode} />}
       <div className="output-note"><div><Icon name="folder" size={18} /><strong>Saved, automatically.</strong></div><p>Every converted image goes straight to your configured output folder.</p><span>Original files are never changed.</span></div>
     </aside></div>
   </>;

@@ -1,6 +1,6 @@
 # WebP Forge
 
-Fast batch image conversion for the web. A local Next.js application that converts JPG, JPEG, and PNG images to WebP with Sharp. One container, no database, no cloud services.
+Fast batch image processing for the web. A local Next.js application that resizes JPG, JPEG, and PNG or converts them to WebP with Sharp. One container, no database, no cloud services.
 
 ## Features
 
@@ -10,7 +10,8 @@ Fast batch image conversion for the web. A local Next.js application that conver
 - A bounded conversion queue shared across requests; four concurrent conversions by default.
 - Per-image status, progress, understandable errors, size comparisons, and total storage savings.
 - Automatic filesystem output, collision-safe names, individual downloads, and streamed ZIP downloads containing only successful images from the selected batch.
-- The results download button saves a `.webp` directly when one image succeeds, or one ZIP when multiple images succeed.
+- Choose Resize images or Convert to WebP from the home page. Resize keeps each image's original format by default, or converts to WebP in the same operation.
+- The results download button saves the output image directly when one image succeeds, or one ZIP when multiple images succeed.
 - PNG transparency, automatic EXIF orientation, and metadata removal.
 - Optional batch resizing by maximum width, height, or both, preserving proportions without cropping or enlargement. Results show original and output dimensions.
 - Validated file extension, MIME type, decoded image format, file count, upload byte count, and a 40-megapixel decoded image limit. Animated PNG is rejected in V1.
@@ -147,9 +148,13 @@ The image uses a multi-stage Debian-based Node build, installs Sharp's Linux bin
 
 ## Resize images
 
-Enable **Resize images** under **Image dimensions**, then enter a maximum width and/or height in pixels (whole numbers from 1 to 16383). Leave one field empty to calculate it from the image's proportions. For example, a 2400 × 1600 image with width `1200` becomes 1200 × 800; a `1200` × `600` bounding box produces 900 × 600. Smaller images keep their dimensions. These settings apply to every image in the next batch and work with all quality presets, including lossless WebP encoding; resizing itself changes pixels.
+The home page lets you choose **Resize images** (`/resize`) or **Convert to WebP** (`/convert`). Use **Choose another tool** to return home; a new tool starts with an empty queue and its own defaults.
 
-Resize is off by default. Outputs keep PNG transparency and automatic orientation, and use the same collision-safe filenames, output folder, individual WebP downloads, and multi-image ZIP. Each completed row reports actual original and output pixel dimensions. The implementation uses Sharp's [`inside` fit and `withoutEnlargement`](https://sharp.pixelplumbing.com/api-resize/).
+In **Resize images**, enter a maximum width and/or height in pixels (whole numbers from 1 to 16383). Leave one field empty to calculate it from the image's proportions. For example, a 2400 × 1600 image with width `1200` becomes 1200 × 800; a `1200` × `600` bounding box produces 900 × 600. Smaller images keep their dimensions. Settings apply to the whole batch.
+
+**Original format** is the resize default: `.jpg` stays `.jpg`, `.jpeg` stays `.jpeg`, and `.png` stays `.png`, even in a mixed batch. Extension casing is normalized to lowercase. JPEG outputs are re-encoded at quality 90; PNG outputs preserve transparency. Select **WebP** to resize and convert in one operation, with the existing quality presets, custom quality, and lossless encoding. Resizing itself changes pixels even when WebP encoding is lossless.
+
+**Convert to WebP** keeps the existing batch conversion behavior, defaults to Balanced quality 80 (or `WEBP_QUALITY`), and retains optional resizing. Both tools auto-orient images, remove metadata, reserve collision-safe names, and save to the configured output folder. A single successful image downloads directly in its output format; multiple successful images download as a ZIP. Each completed row reports actual original and output dimensions. Resizing uses Sharp's [`inside` fit and `withoutEnlargement`](https://sharp.pixelplumbing.com/api-resize/).
 
 ## Architecture and behavior
 
@@ -161,7 +166,7 @@ The browser registers a batch manifest, then sends each image as a separate stre
 
 Download links identify an in-memory batch and file, never an arbitrary filesystem path. Sessions expire after 24 hours, and at most 100 recent batches are retained. Restarting the container clears sessions, but saved output files remain accessible on the host. There is no conversion history or automatic deletion of output files. Run one Node process/container; the registry and queue are deliberately process-local.
 
-Savings compare successfully converted inputs with their outputs; failed images are excluded. WebP can be larger for small images or lossless output, in which case the UI reports a storage increase. ZIP files stream without permanent archives; already-compressed WebP entries are stored without recompression. Browser downloads use a temporary Blob, so very large downloads also require browser memory.
+Savings compare successfully processed inputs with their outputs; failed images are excluded. Outputs can be larger for small images or lossless encoding, in which case the UI reports a storage increase. ZIP files stream without permanent archives; compressed image entries are stored without recompression. Browser downloads use a temporary Blob, so very large downloads also require browser memory.
 
 ## Troubleshooting
 
@@ -214,6 +219,7 @@ Next.js regenerates that file when development or a build starts. Do not use for
 
 ```text
 app/                  App Router page, layout, styles, and API routes
+  convert/, resize/   Separate tool pages; root page selects a task
   api/batches/        Register validated batch manifests
   api/convert/        Stream uploads and convert individual files
   api/download/       Stream a completed image
