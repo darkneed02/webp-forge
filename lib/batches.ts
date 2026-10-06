@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { config } from "./config";
 import { AppError } from "./errors";
 import { validateInput } from "./file-utils";
+import { parseResizeOptions } from "./resize";
 import type { ConversionOptions, ConversionResult } from "./types";
 
 type BatchFile = { id: string; name: string; size: number; mime: string; status: "waiting" | "processing" | "completed" | "failed"; result?: ConversionResult };
@@ -16,9 +17,10 @@ function cleanup() {
 export function createBatch(body: unknown) {
   cleanup();
   if (!body || typeof body !== "object") throw new AppError("Invalid batch.");
-  const { files, quality, lossless } = body as Record<string, unknown>;
+  const { files, quality, lossless, resize } = body as Record<string, unknown>;
   if (!Array.isArray(files) || files.length < 1 || files.length > config.maxFiles) throw new AppError(`Select between 1 and ${config.maxFiles} images.`);
   if (typeof quality !== "number" || !Number.isInteger(quality) || quality < 1 || quality > 100 || typeof lossless !== "boolean") throw new AppError("Quality must be between 1 and 100.");
+  const resizeOptions = parseResizeOptions(resize);
   const items: BatchFile[] = files.map(file => {
     if (!file || typeof file !== "object") throw new AppError("Invalid image details.");
     const { name, size, mime } = file;
@@ -27,7 +29,7 @@ export function createBatch(body: unknown) {
     return { id: randomUUID(), name, size, mime, status: "waiting" };
   });
   if (batches.size >= 100) throw new AppError("Too many recent batches. Restart the app to clear old sessions or try again later.", 429);
-  const batch: Batch = { id: randomUUID(), created: Date.now(), options: { quality, lossless }, files: items };
+  const batch: Batch = { id: randomUUID(), created: Date.now(), options: { quality, lossless, resize: resizeOptions }, files: items };
   batches.set(batch.id, batch);
   return batch;
 }

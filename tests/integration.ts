@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { readFile, readdir, unlink } from "node:fs/promises";
 import path from "node:path";
 import { unzipSync } from "fflate";
+import type { ConversionResult, ResizeOptions } from "../lib/types";
 
 const base = process.env.TEST_BASE_URL ?? "http://127.0.0.1:3000";
 const output = path.resolve(process.env.TEST_OUTPUT_DIR ?? "data/output");
@@ -28,10 +29,10 @@ async function request(url: string, init?: RequestInit) {
   return route(new Request(url, { ...init, headers }));
 }
 type Input = { name: string; mime: string; data: Buffer };
-type Result = { id: string; filename: string; outputSize: number; originalSize: number };
+type Result = ConversionResult;
 async function json<T>(response: Response) { const body = await response.json(); assert.ok(response.ok, JSON.stringify(body)); return body as T; }
-async function batch(inputs: Input[], lossless = false) {
-  return json<{ batchId: string; fileIds: string[] }>(await request(`${base}/api/batches`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files: inputs.map(f => ({ name: f.name, size: f.data.length, mime: f.mime })), quality: 80, lossless }) }));
+async function batch(inputs: Input[], lossless = false, resize?: ResizeOptions) {
+  return json<{ batchId: string; fileIds: string[] }>(await request(`${base}/api/batches`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files: inputs.map(f => ({ name: f.name, size: f.data.length, mime: f.mime })), quality: 80, lossless, resize }) }));
 }
 async function convert(id: string, fileId: string, input: Input) {
   return request(`${base}/api/convert?batch=${id}&id=${fileId}`, { method: "POST", headers: { "Content-Type": input.mime }, body: new Uint8Array(input.data) });
@@ -44,7 +45,9 @@ async function verifyOutput(result: Result, data: Buffer) {
   saved.push(result.filename);
   assert.equal(result.outputSize, data.length);
   assert.deepEqual(await readFile(path.join(output, result.filename)), data);
-  assert.equal((await sharp(data).metadata()).format, "webp");
+  const metadata = await sharp(data).metadata();
+  assert.equal(metadata.format, "webp");
+  assert.equal(result.width, metadata.width); assert.equal(result.height, metadata.height);
 }
 try {
   if (process.env.TEST_IN_PROCESS === "1") await (await import("../lib/config")).initializeStorage();
@@ -59,6 +62,7 @@ try {
   const pendingZip = await request(`${base}/api/zip?batch=${first.batchId}`); assert.equal(pendingZip.status, 404);
   const results = await Promise.all([jpg, png].map(async (input, index) => json<Result>(await convert(first.batchId, first.fileIds[index], input))));
   for (const result of results) await verifyOutput(result, await download(first.batchId, result.id));
+  assert.deepEqual([results[0].width, results[0].height], [160, 100], "Resize is off by default");
   const webpPixels = await sharp(await download(first.batchId, results[1].id)).ensureAlpha().raw().toBuffer();
   for (let i = 3; i < raw.length; i += 4) assert.equal(webpPixels[i], raw[i], "PNG alpha must survive conversion");
   const originalDownload = await download(first.batchId, results[0].id);
@@ -92,12 +96,46 @@ try {
   const mixedZip = await request(`${base}/api/zip?batch=${mixed.batchId}`); assert.equal(mixedZip.status, 200);
   assert.equal(Object.keys(unzipSync(new Uint8Array(await mixedZip.arrayBuffer()))).length, successCount);
   const inputs = Array.from({ length: 100 }, (_, index) => ({ ...jpg, name: `${prefix}-batch-${index}.jpg` }));
-  const many = await batch(inputs); let next = 0;
-  await Promise.all(Array.from({ length: 8 }, async () => { while (next < inputs.length) { const index = next++; const result = await json<Result>(await convert(many.batchId, many.fileIds[index], inputs[index])); await verifyOutput(result, await download(many.batchId, result.id)); } }));
+  const many = await batch(inputs, false, { width: 40 }); let next = 0;
+  await Promise.all(Array.from({ length: 8 }, async () => { while (next < inputs.length) { const index = next++; const result = await json<Result>(await convert(many.batchId, many.fileIds[index], inputs[index])); await verifyOutput(result, await download(many.batchId, result.id)); assert.deepEqual([result.width, result.height], [40, 25]); } }));
   const manyZip = await request(`${base}/api/zip?batch=${many.batchId}`); assert.equal(manyZip.status, 200);
   assert.equal(Object.keys(unzipSync(new Uint8Array(await manyZip.arrayBuffer()))).length, 100);
+  // The same settings apply independently to landscape JPEG and transparent PNG.
+  for (const scenario of [
+    { resize: { width: 40 }, expected: [[40, 25], [40, 30]], lossless: false },
+    { resize: { height: 30 }, expected: [[48, 30], [40, 30]], lossless: true },
+    { resize: { width: 60, height: 30 }, expected: [[48, 30], [40, 30]], lossless: false },
+    { resize: { width: 1000, height: 1000 }, expected: [[160, 100], [80, 60]], lossless: false },
+  ]) {
+    const inputs = [jpg, png]; const resized = await batch(inputs, scenario.lossless, scenario.resize);
+    const outputs: Result[] = [];
+    for (const [index, input] of inputs.entries()) {
+      const result = await json<Result>(await convert(resized.batchId, resized.fileIds[index], input));
+      const data = await download(resized.batchId, result.id); await verifyOutput(result, data);
+      outputs.push(result);
+      assert.deepEqual([result.width, result.height], scenario.expected[index]);
+      assert.deepEqual([result.originalWidth, result.originalHeight], index ? [80, 60] : [160, 100]);
+      if (index === 1) {
+        assert.equal((await sharp(data).metadata()).hasAlpha, true);
+        const stats = await sharp(data).stats(); assert.ok(stats.channels[3].min < 255, "Resize must retain transparency");
+      }
+    }
+    const response = await request(`${base}/api/zip?batch=${resized.batchId}`); assert.equal(response.status, 200);
+    const entries = unzipSync(new Uint8Array(await response.arrayBuffer()));
+    assert.deepEqual(Object.keys(entries).sort(), outputs.map(item => item.filename).sort());
+    for (const item of outputs) assert.deepEqual(Buffer.from(entries[item.filename]), await download(resized.batchId, item.id));
+  }
+  const oriented: Input = { ...jpg, name: `${prefix}-oriented.jpg`, data: await sharp(jpgData).withMetadata({ orientation: 6 }).jpeg().toBuffer() };
+  const rotatedBatch = await batch([oriented], false, { width: 30 });
+  const rotatedResult = await json<Result>(await convert(rotatedBatch.batchId, rotatedBatch.fileIds[0], oriented));
+  await verifyOutput(rotatedResult, await download(rotatedBatch.batchId, rotatedResult.id));
+  assert.deepEqual([rotatedResult.originalWidth, rotatedResult.originalHeight, rotatedResult.width, rotatedResult.height], [100, 160, 30, 48], "Resize must use displayed EXIF orientation");
+  for (const resize of [null, {}, [], { width: 0 }, { height: 1.5 }, { width: "40" }, { width: 16384 }, { height: -30 }]) {
+    const response = await request(`${base}/api/batches`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files: [{ name: jpg.name, mime: jpg.mime, size: jpg.data.length }], quality: 80, lossless: false, resize }) });
+    assert.equal(response.status, 400, `Invalid resize ${JSON.stringify(resize)} must be rejected before upload`);
+  }
   assert.equal((await readdir(uploads)).filter(name => name.endsWith(".upload")).length, 0);
-  console.log("PASS: JPEG, alpha-preserving PNG, lossless, 100-image batch, conflicts, individual downloads, ZIP contents, corrupted/spoofed input, size/type validation, cross-site blocking, host output, temporary cleanup.");
+  console.log("PASS: JPEG, alpha-preserving PNG, lossless, 100-image batch, conflicts, individual downloads, ZIP contents, corrupted/spoofed input, size/type validation, resize dimensions/bounds/no enlargement/EXIF/alpha/ZIP/validation, cross-site blocking, filesystem output, temporary cleanup.");
 } finally {
   for (const filename of saved) await unlink(path.join(output, filename)).catch(() => {});
 }

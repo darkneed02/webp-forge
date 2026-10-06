@@ -12,6 +12,7 @@ Fast batch image conversion for the web. A local Next.js application that conver
 - Automatic filesystem output, collision-safe names, individual downloads, and streamed ZIP downloads containing only successful images from the selected batch.
 - The results download button saves a `.webp` directly when one image succeeds, or one ZIP when multiple images succeed.
 - PNG transparency, automatic EXIF orientation, and metadata removal.
+- Optional batch resizing by maximum width, height, or both, preserving proportions without cropping or enlargement. Results show original and output dimensions.
 - Validated file extension, MIME type, decoded image format, file count, upload byte count, and a 40-megapixel decoded image limit. Animated PNG is rejected in V1.
 
 ## Requirements
@@ -144,6 +145,12 @@ docker compose config --quiet         # Validate Compose configuration
 
 The image uses a multi-stage Debian-based Node build, installs Sharp's Linux binaries inside Docker, and checks `/api/health` for readable/writable storage. Do not copy host `node_modules` into the image.
 
+## Resize images
+
+Enable **Resize images** under **Image dimensions**, then enter a maximum width and/or height in pixels (whole numbers from 1 to 16383). Leave one field empty to calculate it from the image's proportions. For example, a 2400 × 1600 image with width `1200` becomes 1200 × 800; a `1200` × `600` bounding box produces 900 × 600. Smaller images keep their dimensions. These settings apply to every image in the next batch and work with all quality presets, including lossless WebP encoding; resizing itself changes pixels.
+
+Resize is off by default. Outputs keep PNG transparency and automatic orientation, and use the same collision-safe filenames, output folder, individual WebP downloads, and multi-image ZIP. Each completed row reports actual original and output pixel dimensions. The implementation uses Sharp's [`inside` fit and `withoutEnlargement`](https://sharp.pixelplumbing.com/api-resize/).
+
 ## Architecture and behavior
 
 ```text
@@ -222,6 +229,6 @@ Dockerfile            Multi-stage production build
 docker-compose.yml    Local port, host mount, environment, temporary storage
 ```
 
-Future output formats and resizing can extend `lib/converter.ts` and the typed conversion options without changing upload, queue, or download responsibilities. They are not implemented in V1.
+Future output formats and other transformations can extend `lib/converter.ts` and the typed conversion options without changing upload, queue, or download responsibilities. Batch resizing is available; other future transformations are not implemented.
 
 Framework references: [Next.js](https://nextjs.org/docs/app/getting-started/installation), [Sharp WebP output](https://sharp.pixelplumbing.com/api-output/#webp), and [shadcn/ui](https://ui.shadcn.com/docs).

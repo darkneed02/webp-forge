@@ -43,6 +43,17 @@ Checked on 2026-10-06:
 - Follow-up verification after the user ran setup: `main`, `develop`, and `chore/git-workflow` now exist, the active branch is `chore/git-workflow`, and local `core.hooksPath` is `.githooks`. Both shell files are executable and the pre-commit guard accepts this task branch. The setup's earlier permission failure is resolved by the user's Terminal run; workflow changes are still pending commit at this verification point.
 - The initial workflow and tracking changes were then committed as `107fdfd`. Verification found that the installed hook must remain local rather than tracked: setup now installs it from `.githooks/pre-commit.sh`, while `.githooks/pre-commit` is ignored. The nine tests passed again, including switching to baseline `main`/`develop` branches that do not contain the tracked template and verifying that their direct commits are still blocked.
 
+## Image resize feature
+
+Implemented on `feature/image-resize` on 2026-10-06; resize is optional and disabled by default.
+
+- Strict TypeScript, ESLint, all ten unit tests, and the production Next.js build passed.
+- In-process route/Sharp acceptance passed: width-only, height-only, bounding-box fit, no enlargement, original dimensions when disabled, EXIF orientation, PNG transparency in lossy/lossless modes, a 100-image resized batch, conflict-safe output, individual downloads, exact ZIP contents, invalid resize rejection, and temporary cleanup.
+- Browser acceptance was expanded to cover resize enable/disable, missing dimensions, persistence across quality/theme changes, actual downloaded dimensions, readable fields in both themes, and mobile layout. Execution was attempted but Chromium launch failed with macOS `bootstrap_check_in` permission denied; no browser assertions ran.
+- A production HTTP server on `127.0.0.1:3001` was attempted but denied with `EPERM`. Live HTTP checks of this feature remain outstanding.
+- `docker compose build` was attempted but denied while writing Docker Buildx's activity file under `~/.docker/buildx/activity`. `docker compose ps` could read the daemon and reported the existing container healthy; that container predates this feature, so this is not verification of the new Docker image or resize through a bind mount. Rebuild from an unrestricted Terminal using the commands below before testing the feature at localhost.
+- No protected branch merge, release version bump, tag, or push was performed.
+
 ## Remaining acceptance checks
 
 On a machine/session with Docker and browser access:

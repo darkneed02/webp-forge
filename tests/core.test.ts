@@ -69,3 +69,16 @@ test("batch rejects incorrect limits, types, and quality", () => {
   assert.equal(getBatch(batch.id), batch);
   for (const body of [ { files: [], quality: 80, lossless: false }, { files: [file], quality: 0, lossless: false }, { files: [file], quality: 80, lossless: "no" }, { files: [{ ...file, size: 31 * 1024 * 1024 }], quality: 80, lossless: false }, { files: Array(101).fill(file), quality: 80, lossless: false } ]) assert.throws(() => createBatch(body));
 });
+
+test("batch validates resize settings and snapshots dimensions independently of the request", () => {
+  const body = { files: [{ name: "photo.jpg", mime: "image/jpeg", size: 10 }], quality: 80, lossless: false };
+  for (const resize of [null, [], "100", {}, { width: null }, { width: "100" }, { width: 0 }, { height: -1 }, { width: 1.5 }, { width: NaN }, { height: Infinity }, { width: 16384 }]) {
+    assert.throws(() => createBatch({ ...body, resize }), /resize/i, JSON.stringify(resize));
+  }
+  assert.equal(createBatch(body).options.resize, undefined);
+  const resize = { width: 16383, height: 1 };
+  const batch = createBatch({ ...body, resize });
+  resize.width = 0;
+  assert.deepEqual(batch.options.resize, { width: 16383, height: 1 });
+  assert.equal(createBatch({ ...body, resize: { height: 600 } }).options.resize?.height, 600);
+});

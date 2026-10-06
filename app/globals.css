@@ -162,6 +162,16 @@ h1 span { color: var(--text-secondary); }
 .custom-quality input { width: 100%; margin: 12px 0; accent-color: var(--primary); }
 .custom-quality div { display: flex; justify-content: space-between; color: var(--muted); font-size: 9px; }
 .convert-button { width: 100%; margin-top: 14px; min-height: 46px; font-size: 13px; }
+.resize-card { margin-top: 18px; }
+.resize-toggle { display: flex; align-items: center; gap: 9px; font-size: 12px; font-weight: 600; cursor: pointer; }
+.resize-toggle input { accent-color: var(--primary); width: 15px; height: 15px; }
+.resize-inputs { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; margin-top: 18px; }
+.resize-inputs label { color: var(--text-subtle); font-size: 11px; }
+.resize-inputs input { display: block; width: 100%; min-height: 38px; margin-top: 8px; border: 1px solid var(--outline); border-radius: 6px; padding: 8px; background: var(--surface); color: var(--foreground); }
+.resize-inputs input::placeholder { color: var(--text-subtle); }
+.resize-inputs input[aria-invalid=true] { border-color: var(--error-text); }
+.resize-error { color: var(--error-text); font-size: 11px; line-height: 1.6; }
+.image-dimensions { white-space: normal; line-height: 1.6; }
 .convert-button > svg:last-child { margin-left: auto; }
 .convert-button > span { font-size: 10px; padding: 2px 5px; border-radius: 4px; background: color-mix(in srgb, currentColor 12%, transparent); }
 .output-note { border: 1px solid var(--border); border-radius: 9px; padding: 17px 20px; margin-top: 18px; }
