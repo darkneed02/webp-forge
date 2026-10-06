@@ -1,6 +1,6 @@
 # WebP Forge
 
-Fast batch image conversion for the web. A local Next.js application that converts JPG, JPEG, and PNG images to WebP with Sharp. One container, no database, no cloud services.
+Fast batch image processing for the web. A local Next.js application that resizes JPG, JPEG, and PNG or converts them to WebP with Sharp. One container, no database, no cloud services.
 
 ## Features
 
@@ -10,15 +10,17 @@ Fast batch image conversion for the web. A local Next.js application that conver
 - A bounded conversion queue shared across requests; four concurrent conversions by default.
 - Per-image status, progress, understandable errors, size comparisons, and total storage savings.
 - Automatic filesystem output, collision-safe names, individual downloads, and streamed ZIP downloads containing only successful images from the selected batch.
-- The results download button saves a `.webp` directly when one image succeeds, or one ZIP when multiple images succeed.
+- Choose Resize images or Convert to WebP from the home page. Resize keeps each image's original format by default, or converts to WebP in the same operation.
+- The results download button saves the output image directly when one image succeeds, or one ZIP when multiple images succeed.
 - PNG transparency, automatic EXIF orientation, and metadata removal.
+- Batch or per-image resizing by pixel bounds or percentage, with 20–80% presets, preserving proportions without cropping or enlargement. Results show original and output dimensions.
 - Validated file extension, MIME type, decoded image format, file count, upload byte count, and a 40-megapixel decoded image limit. Animated PNG is rejected in V1.
 
 ## Requirements
 
 For Docker: Docker Desktop on macOS/Windows, or Docker Engine with the Compose plugin on Linux. Allow several GB of free disk space for the image build and converted files.
 
-For development: Node.js 22 LTS and npm. Sharp runs on the server; the browser does not perform conversion. Platform-specific native Sharp dependencies are installed by npm.
+For development: Node.js 22 LTS, npm, and Git. Use Terminal or Git Bash for the Git workflow setup and checks. Sharp runs on the server; the browser does not perform conversion. Platform-specific native Sharp dependencies are installed by npm.
 
 ## Quick start with Docker
 
@@ -144,6 +146,20 @@ docker compose config --quiet         # Validate Compose configuration
 
 The image uses a multi-stage Debian-based Node build, installs Sharp's Linux binaries inside Docker, and checks `/api/health` for readable/writable storage. Do not copy host `node_modules` into the image.
 
+## Resize images
+
+The home page lets you choose **Resize images** (`/resize`) or **Convert to WebP** (`/convert`). Use **Choose another tool** to return home; a new tool starts with an empty queue and its own defaults.
+
+In **Resize images**, choose **All images — same settings** (default) to set a size once for the whole batch, or **Each image — different settings** to edit the controls under each uploaded image. Individual settings start from the current batch settings and remain saved when switching scopes; all-images mode uses only the batch settings. Newly added images in individual mode also start from the current batch settings.
+
+Choose **Pixels** for a maximum width and/or height (whole numbers from 1 to 16383). Leave one field empty to calculate it from the image's proportions. For example, a 2400 × 1600 image with width `1200` becomes 1200 × 800; a `1200` × `600` bounding box produces 900 × 600. Smaller images keep their dimensions.
+
+Choose **Percentage** for 20%, 30%, 40%, 50%, 60%, 70%, or 80% presets, or enter a whole number from 1–100. The percentage denotes the remaining width and height: 50% turns 2400 × 1600 into 1200 × 800. It does not specify a byte-size reduction. Bounds are rounded to pixels (minimum 1 px), then fitted proportionally. Both scopes support pixels and percentages, including different methods within one batch. Percentage calculation uses the correctly oriented original image each time, so rerunning a batch does not shrink previous outputs again.
+
+**Original format** is the resize default: `.jpg` stays `.jpg`, `.jpeg` stays `.jpeg`, and `.png` stays `.png`, even in a mixed batch. Extension casing is normalized to lowercase. JPEG outputs are re-encoded at quality 90; PNG outputs preserve transparency. Select **WebP** to resize and convert in one operation, with the existing quality presets, custom quality, and lossless encoding. Resizing itself changes pixels even when WebP encoding is lossless.
+
+**Convert to WebP** keeps the existing batch conversion behavior, defaults to Balanced quality 80 (or `WEBP_QUALITY`), and retains optional resizing. Both tools auto-orient images, remove metadata, reserve collision-safe names, and save to the configured output folder. A single successful image downloads directly in its output format; multiple successful images download as a ZIP. Each completed row reports actual original and output dimensions. Resizing uses Sharp's [`inside` fit and `withoutEnlargement`](https://sharp.pixelplumbing.com/api-resize/).
+
 ## Architecture and behavior
 
 ```text
@@ -154,7 +170,7 @@ The browser registers a batch manifest, then sends each image as a separate stre
 
 Download links identify an in-memory batch and file, never an arbitrary filesystem path. Sessions expire after 24 hours, and at most 100 recent batches are retained. Restarting the container clears sessions, but saved output files remain accessible on the host. There is no conversion history or automatic deletion of output files. Run one Node process/container; the registry and queue are deliberately process-local.
 
-Savings compare successfully converted inputs with their outputs; failed images are excluded. WebP can be larger for small images or lossless output, in which case the UI reports a storage increase. ZIP files stream without permanent archives; already-compressed WebP entries are stored without recompression. Browser downloads use a temporary Blob, so very large downloads also require browser memory.
+Savings compare successfully processed inputs with their outputs; failed images are excluded. Outputs can be larger for small images or lossless encoding, in which case the UI reports a storage increase. ZIP files stream without permanent archives; compressed image entries are stored without recompression. Browser downloads use a temporary Blob, so very large downloads also require browser memory.
 
 ## Troubleshooting
 
@@ -167,10 +183,47 @@ Savings compare successfully converted inputs with their outputs; failed images 
 - **ZIP or download fails:** ensure the host output files still exist. Retry the download after transient failures. If the app restarted or the session expired, retrieve files from the host folder or convert again.
 - **Local development tries to write `/app`:** override Docker environment paths in `.env.local` with repository-relative paths.
 
+## What belongs in Git
+
+Branch, commit, testing, and release rules are in [CONTRIBUTING.md](CONTRIBUTING.md). Start each independent feature or bug fix on a separate task branch. `main` is stable; `develop` is for integration/testing. Run `npm run git:setup` once per clone to create the local branch structure and enable the commit guard.
+
+Commit the hook template `.githooks/pre-commit.sh`. The installed `.githooks/pre-commit` is generated locally and ignored, allowing it to keep working across branch switches.
+
+| Include in the repository | Keep local; excluded by `.gitignore` |
+| --- | --- |
+| Application source: `app/`, `components/`, `lib/`, `instrumentation.ts` | Installed dependencies: `node_modules/` |
+| Automated tests: `tests/` | Screenshots and reports: `test-results/`, `playwright-report/`, `coverage/` |
+| Public application assets: `public/` | Uploaded and converted images: `data/`, `output/`, `uploads/` |
+| `package.json` and **`package-lock.json`** | Generated builds and types: `.next/`, `out/`, `dist/`, `build/`, `next-env.d.ts`, `*.tsbuildinfo` |
+| TypeScript, Next.js, Tailwind/PostCSS, ESLint, and shadcn configuration | Private `.env` files, including `.env.local` and `.env.production` |
+| Dockerfile, Compose, entrypoint, `.dockerignore`, `.gitignore` | Logs, caches, editor settings, and operating system files |
+| Sanitized `.env.example` | Actual personal paths, credentials, and runtime configuration values in local environment files |
+| README, contributor guidance, third-party notices, validation notes | Temporary files created while running or testing the app |
+| `data/output/.gitkeep` and `data/uploads/.gitkeep` | Everything else inside those runtime directories |
+
+Keep the npm lockfile so collaborators and Docker use the same dependency versions. Application assets and intentional test fixtures can be committed; image extensions are **not** globally ignored. Keep private images in the runtime folders above. If a custom host output directory is inside the repository, add its exact directory to `.gitignore` too, or place it outside the repository.
+
+Review inclusion before committing:
+
+```bash
+git status --short                     # Pending repository changes
+git status --ignored --short           # Include ignored local files
+git ls-files -ci --exclude-standard    # Tracked files now matching ignore rules
+```
+
+Ignore rules do not remove files that were already tracked. For the generated Next.js type declaration, stop tracking it while retaining the local file:
+
+```bash
+git rm --cached -- next-env.d.ts
+```
+
+Next.js regenerates that file when development or a build starts. Do not use force-add for private environment files or runtime images.
+
 ## Project structure
 
 ```text
 app/                  App Router page, layout, styles, and API routes
+  convert/, resize/   Separate tool pages; root page selects a task
   api/batches/        Register validated batch manifests
   api/convert/        Stream uploads and convert individual files
   api/download/       Stream a completed image
@@ -186,6 +239,6 @@ Dockerfile            Multi-stage production build
 docker-compose.yml    Local port, host mount, environment, temporary storage
 ```
 
-Future output formats and resizing can extend `lib/converter.ts` and the typed conversion options without changing upload, queue, or download responsibilities. They are not implemented in V1.
+Future output formats and other transformations can extend `lib/converter.ts` and the typed conversion options without changing upload, queue, or download responsibilities. Batch resizing is available; other future transformations are not implemented.
 
 Framework references: [Next.js](https://nextjs.org/docs/app/getting-started/installation), [Sharp WebP output](https://sharp.pixelplumbing.com/api-output/#webp), and [shadcn/ui](https://ui.shadcn.com/docs).

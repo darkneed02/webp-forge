@@ -22,7 +22,7 @@ export async function POST(request: Request) {
       await ensureDirectories();
       temp = path.join(config.uploadDir, `${randomUUID()}.upload`);
       await receiveUpload(request, temp, file.size, config.maxUploadMB * 1024 * 1024);
-      const result = await convertImage(temp, file.name, file.mime, batch.options);
+      const result = await convertImage(temp, file.name, file.mime, { ...batch.options, resize: file.resize });
       file.result = { ...result, originalSize: file.size, id: file.id };
       file.status = "completed";
       return Response.json(file.result);

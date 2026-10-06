@@ -8,6 +8,7 @@ import { ConversionQueue } from "../lib/queue";
 import { safeBaseName, reserveOutput, validateInput, openOutput } from "../lib/file-utils";
 import { createBatch, getBatch } from "../lib/batches";
 import { config, initializeStorage } from "../lib/config";
+import { parseResizeOptions, resizeDimensions, resizeFromSettings } from "../lib/resize";
 
 test("queue limits concurrency and recovers after a rejected task", async () => {
   const queue = new ConversionQueue(4); let active = 0; let maximum = 0; let count = 0;
@@ -68,4 +69,68 @@ test("batch rejects incorrect limits, types, and quality", () => {
   const batch = createBatch({ files: [file], quality: 80, lossless: false });
   assert.equal(getBatch(batch.id), batch);
   for (const body of [ { files: [], quality: 80, lossless: false }, { files: [file], quality: 0, lossless: false }, { files: [file], quality: 80, lossless: "no" }, { files: [{ ...file, size: 31 * 1024 * 1024 }], quality: 80, lossless: false }, { files: Array(101).fill(file), quality: 80, lossless: false } ]) assert.throws(() => createBatch(body));
+});
+
+test("batch validates resize settings and snapshots dimensions independently of the request", () => {
+  const body = { files: [{ name: "photo.jpg", mime: "image/jpeg", size: 10 }], quality: 80, lossless: false };
+  for (const resize of [null, [], "100", {}, { width: null }, { width: "100" }, { width: 0 }, { height: -1 }, { width: 1.5 }, { width: NaN }, { height: Infinity }, { width: 16384 }]) {
+    assert.throws(() => createBatch({ ...body, resize }), /resize/i, JSON.stringify(resize));
+  }
+  assert.equal(createBatch(body).options.resize, undefined);
+  const resize = { width: 16383, height: 1 };
+  const batch = createBatch({ ...body, resize });
+  resize.width = 0;
+  assert.deepEqual(batch.options.resize, { width: 16383, height: 1 });
+  assert.equal(createBatch({ ...body, resize: { height: 600 } }).options.resize?.height, 600);
+});
+
+test("output selection defaults to WebP and requires valid dimensions for original format", () => {
+  const body = { files: [{ name: "photo.jpg", mime: "image/jpeg", size: 10 }], quality: 80, lossless: false };
+  assert.equal(createBatch(body).options.outputFormat, "webp");
+  assert.equal(createBatch({ ...body, outputFormat: "original", resize: { width: 100 } }).options.outputFormat, "original");
+  for (const outputFormat of ["jpg", "avif", "../png", null, 1, {}]) assert.throws(() => createBatch({ ...body, outputFormat, resize: { width: 100 } }), /output format/);
+  assert.throws(() => createBatch({ ...body, outputFormat: "original" }), /resize dimensions/);
+});
+
+test("original-format output reserves safe names and never overwrites matching input paths", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "forge-format-"));
+  try {
+    for (const extension of ["jpg", "jpeg", "png"] as const) {
+      await writeFile(path.join(directory, `photo.${extension}`), "original");
+      const output = await reserveOutput(directory, "../../photo.png", extension);
+      assert.equal(output.filename, `photo-1.${extension}`);
+      await output.handle.writeFile("resized"); await output.handle.close();
+      const handle = await openOutput(directory, output.filename);
+      assert.equal((await handle.readFile()).toString(), "resized"); await handle.close();
+      assert.equal((await readFile(path.join(directory, `photo.${extension}`))).toString(), "original");
+    }
+    for (const filename of ["../photo.png", "photo.svg", "photo.jpg/secret", "photo.png.exe"]) await assert.rejects(() => openOutput(directory, filename));
+    await symlink(path.join(directory, "photo.png"), path.join(directory, "linked.png"));
+    await assert.rejects(() => openOutput(directory, "linked.png"));
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("percentage resizing rejects ambiguous or invalid settings and rounds to at least one pixel", () => {
+  for (const percent of [0, 101, 20.5, "50", null, NaN, Infinity]) assert.throws(() => parseResizeOptions({ percent }), /percentage/);
+  assert.throws(() => parseResizeOptions({ percent: 50, width: 100 }), /either/);
+  assert.throws(() => parseResizeOptions({ percent: 50, height: 100 }), /either/);
+  for (const percent of [20, 30, 40, 50, 60, 70, 80, 100]) assert.deepEqual(resizeDimensions(parseResizeOptions({ percent })!, 1000, 500), { width: percent * 10, height: percent * 5 });
+  assert.deepEqual(resizeDimensions({ percent: 1 }, 1, 2), { width: 1, height: 1 });
+  assert.deepEqual(resizeDimensions({ percent: 50 }, 101, 67), { width: 51, height: 34 });
+  const fields = { enabled: true, method: "percent" as const, percent: "30", width: "invalid", height: "" };
+  assert.deepEqual(resizeFromSettings(fields), { percent: 30 }, "Inactive pixel fields must be ignored");
+  assert.throws(() => resizeFromSettings({ ...fields, percent: "" }), /percentage/);
+});
+
+test("per-image resize overrides batch defaults, validates each file, and snapshots request values", () => {
+  const file = { name: "photo.jpg", mime: "image/jpeg", size: 10 };
+  const individual = { percent: 30 };
+  const body = { files: [{ ...file, resize: individual }, { ...file, resize: { width: 200 } }, file], quality: 80, lossless: false, resize: { percent: 50 }, outputFormat: "original" };
+  const batch = createBatch(body);
+  individual.percent = 0;
+  assert.deepEqual(batch.files.map(image => image.resize), [{ percent: 30 }, { width: 200, height: undefined }, { percent: 50 }]);
+  const independent = createBatch({ ...body, resize: undefined, files: [{ ...file, resize: { percent: 20 } }] });
+  assert.deepEqual(independent.files[0].resize, { percent: 20 });
+  assert.throws(() => createBatch({ ...body, files: [{ ...file, resize: { percent: 0 } }] }), /percentage/);
+  assert.throws(() => createBatch({ ...body, resize: undefined, files: [file] }), /resize dimensions/);
 });

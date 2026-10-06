@@ -2,6 +2,7 @@ import { Readable } from "node:stream";
 import { getBatchFile } from "@/lib/batches";
 import { config } from "@/lib/config";
 import { openOutput } from "@/lib/file-utils";
+import { outputMimeTypes } from "@/lib/output-format";
 import { AppError, errorResponse } from "@/lib/errors";
 export const runtime = "nodejs";
 export async function GET(request: Request) {
@@ -12,7 +13,7 @@ export async function GET(request: Request) {
     const handle = await openOutput(config.outputDir, file.result.filename);
     const size = (await handle.stat()).size;
     return new Response(Readable.toWeb(handle.createReadStream()) as ReadableStream, { headers: {
-      "Content-Type": "image/webp", "Content-Length": String(size), "Content-Disposition": `attachment; filename="${file.result.filename}"`, "Cache-Control": "no-store"
+      "Content-Type": outputMimeTypes[file.result.format], "Content-Length": String(size), "Content-Disposition": `attachment; filename="${file.result.filename}"`, "Cache-Control": "no-store"
     } });
   } catch (error) { return errorResponse(error); }
 }

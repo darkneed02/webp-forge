@@ -1,11 +1,41 @@
+# Installed dependencies and generated build/type files
 node_modules/
-.next/
+/.next/
+/out/
+/dist/
+/build/
+*.tsbuildinfo
+/next-env.d.ts
+
+# Private environment settings; keep the sanitized example
 .env*
 !.env.example
-data/*/*
-!data/*/.gitkeep
-output/
-test-results/
-*.tsbuildinfo
-.DS_Store
+
+# Runtime images and uploads; keep only empty directory placeholders
+/data/*
+!/data/output/
+!/data/uploads/
+/data/output/*
+!/data/output/.gitkeep
+/data/uploads/*
+!/data/uploads/.gitkeep
+/output/
+/uploads/
+
+# Test artifacts, coverage, caches, and logs
+/test-results/
+/playwright-report/
+/coverage/
+/.cache/
+*.log
 npm-debug.log*
+
+# Machine-specific editor and operating system files
+/.githooks/pre-commit
+/.idea/
+/.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo

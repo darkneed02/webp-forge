@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import sharp from "sharp";
-import { mkdir, readdir, unlink } from "node:fs/promises";
+import { mkdir, readFile, readdir, unlink } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { unzipSync } from "fflate";
 
 const base = process.env.TEST_BASE_URL ?? "http://127.0.0.1:3000";
 const prefix = `forge-browser-${randomUUID().slice(0, 8)}`;
@@ -18,10 +19,12 @@ async function checkTheme(scheme: "light" | "dark") {
     const body = getComputedStyle(document.body);
     const card = getComputedStyle(document.querySelector(".card")!);
     const button = getComputedStyle(document.querySelector(".button-outline")!);
+    const input = document.querySelector(".resize-controls input[type=number]");
+    const inputStyles = input ? getComputedStyle(input) : undefined;
     return {
       scheme: getComputedStyle(document.documentElement).colorScheme,
       background: body.backgroundColor,
-      pairs: [[body.color, body.backgroundColor], [card.color, card.backgroundColor], [button.color, button.backgroundColor]],
+      pairs: [[body.color, body.backgroundColor], [card.color, card.backgroundColor], [button.color, button.backgroundColor], ...(inputStyles ? [[inputStyles.color, inputStyles.backgroundColor]] : [])],
     };
   });
   function luminance(color: string) {
@@ -41,6 +44,9 @@ async function checkTheme(scheme: "light" | "dark") {
 try {
   await page.emulateMedia({ colorScheme: "light" });
   await page.goto(base);
+  await page.getByRole("heading", { name: "What would you like to do?" }).waitFor();
+  assert.equal(await page.locator(".tool-card").count(), 2);
+  await page.getByRole("link", { name: /Convert to WebP/ }).click();
   await page.getByRole("heading", { name: "Drop your images here" }).waitFor();
   assert.equal(await page.getByRole("button", { name: "Convert to WebP" }).isDisabled(), true);
   const jpeg = await sharp({ create: { width: 200, height: 120, channels: 3, background: "#bb542f" } }).jpeg().toBuffer();
@@ -53,18 +59,34 @@ try {
   assert.notEqual(lightBackground, darkBackground);
   assert.equal(await page.locator(".thumbnail img").count(), 2, "Switching system themes must preserve selected images");
   assert.ok(await page.getByRole("radio", { name: /Balanced/ }).isChecked());
+  assert.equal(await page.getByLabel("Resize images", { exact: true }).isChecked(), false);
+  await page.getByLabel("Resize images", { exact: true }).check();
+  await page.getByLabel("Max width (px)").fill("");
+  await page.getByRole("alert").waitFor();
+  assert.equal(await page.getByRole("button", { name: /Convert to WebP/ }).isDisabled(), true);
+  await page.getByLabel("Max width (px)").fill("80");
+  await page.getByLabel("Max height (px)").fill("50");
+  await checkTheme("light"); await checkTheme("dark");
+  assert.equal(await page.getByLabel("Max width (px)").inputValue(), "80", "Theme changes must preserve resize settings");
   await page.getByRole("radio", { name: /Custom/ }).check();
   await page.locator("#quality-slider").fill("73");
   await page.getByRole("radio", { name: /Lossless/ }).check();
+  assert.equal(await page.getByLabel("Max width (px)").inputValue(), "80", "Quality changes must preserve resize settings");
   await page.getByRole("button", { name: /Convert to WebP/ }).click();
   await page.getByRole("heading", { name: "Conversion complete" }).waitFor({ timeout: 30_000 });
   assert.equal(await page.locator(".status-completed").count(), 2);
+  assert.equal(await page.locator(".image-dimensions").first().innerText(), "200 × 120 → 80 × 48 px");
+  assert.equal(await page.locator(".image-dimensions").nth(1).innerText(), "100 × 100 → 50 × 50 px");
   const downloadEvent = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download All ZIP" }).click();
   const download = await downloadEvent; assert.equal(download.suggestedFilename(), "webp-forge.zip"); assert.equal(await download.failure(), null);
   const individualEvent = page.waitForEvent("download");
   await page.getByRole("button", { name: `Download ${prefix}.webp`, exact: true }).click();
-  assert.equal((await individualEvent).suggestedFilename(), `${prefix}.webp`);
+  const individual = await individualEvent;
+  assert.equal(individual.suggestedFilename(), `${prefix}.webp`);
+  const filePath = await individual.path(); assert.ok(filePath);
+  const metadata = await sharp(await readFile(filePath)).metadata();
+  assert.deepEqual([metadata.width, metadata.height], [80, 48]);
   await mkdir("test-results", { recursive: true });
   await page.screenshot({ path: "test-results/desktop-dark.png", fullPage: true });
   await checkTheme("light");
@@ -78,9 +100,11 @@ try {
   await page.screenshot({ path: "test-results/mobile-dark.png", fullPage: true });
   await page.getByRole("button", { name: "Clear all" }).click();
   await page.getByRole("heading", { name: "Your image queue" }).waitFor();
+  await page.getByLabel("Resize images", { exact: true }).uncheck();
   await page.getByLabel("Select images to convert").setInputFiles([{ name: `${prefix}-single.jpg`, mimeType: "image/jpeg", buffer: jpeg }]);
   await page.getByRole("button", { name: /Convert to WebP/ }).click();
   await page.getByRole("heading", { name: "Conversion complete" }).waitFor();
+  assert.equal(await page.locator(".image-dimensions").innerText(), "200 × 120 → 200 × 120 px");
   assert.equal(await page.getByRole("button", { name: "Download All ZIP" }).count(), 0);
   const singleEvent = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download WebP", exact: true }).click();
@@ -102,8 +126,83 @@ try {
   await page.getByRole("button", { name: "Clear all" }).click();
   await page.getByLabel("Select images to convert").setInputFiles([{ name: "bad.svg", mimeType: "image/svg+xml", buffer: Buffer.from("<svg/>") }]);
   await page.getByRole("alert").waitFor();
+  await page.getByRole("button", { name: "Choose another tool" }).click();
+  await page.getByRole("heading", { name: "What would you like to do?" }).waitFor();
+  await page.getByRole("link", { name: /Resize images/ }).click();
+  await page.getByRole("heading", { name: "Save resized images as" }).waitFor();
+  assert.ok(await page.getByRole("radio", { name: /Original format/ }).isChecked());
+  assert.equal(await page.getByRole("radio", { name: /Balanced/ }).count(), 0);
+  await page.getByLabel("Max width (px)").fill("");
+  assert.equal(await page.getByRole("button", { name: /^Resize images/ }).isDisabled(), true);
+  await page.getByLabel("Max width (px)").fill("80");
+  await page.getByLabel("Select images to convert").setInputFiles([
+    { name: `${prefix}-resize.jpeg`, mimeType: "image/jpeg", buffer: jpeg },
+    { name: `${prefix}-resize.png`, mimeType: "image/png", buffer: png },
+  ]);
+  await checkTheme("light"); await checkTheme("dark");
+  await page.getByRole("button", { name: /^Resize images/ }).click();
+  await page.getByRole("heading", { name: "Resize complete" }).waitFor();
+  assert.equal(await page.locator(".image-dimensions").first().innerText(), "200 × 120 → 80 × 48 px");
+  const resizeZipEvent = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download All ZIP" }).click();
+  const resizeZip = await resizeZipEvent; const resizeZipPath = await resizeZip.path(); assert.ok(resizeZipPath);
+  const entries = unzipSync(new Uint8Array(await readFile(resizeZipPath)));
+  assert.deepEqual(Object.keys(entries).sort(), [`${prefix}-resize.jpeg`, `${prefix}-resize.png`].sort());
+  assert.equal((await sharp(entries[`${prefix}-resize.jpeg`]).metadata()).format, "jpeg");
+  assert.equal((await sharp(entries[`${prefix}-resize.png`]).metadata()).hasAlpha, true);
+  await page.screenshot({ path: "test-results/resize-dark.png", fullPage: true });
+  await page.getByRole("button", { name: "Clear all" }).click();
+  await page.getByLabel("Select images to convert").setInputFiles([{ name: `${prefix}-resize-single.png`, mimeType: "image/png", buffer: png }]);
+  await page.getByRole("button", { name: /^Resize images/ }).click();
+  await page.getByRole("heading", { name: "Resize complete" }).waitFor();
+  const resizedSingleEvent = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download PNG", exact: true }).click();
+  assert.equal((await resizedSingleEvent).suggestedFilename(), `${prefix}-resize-single.png`);
+  await page.getByRole("radio", { name: /^WebP/ }).check();
+  assert.ok(await page.getByRole("radio", { name: /Balanced/ }).isChecked());
+  await page.getByRole("radio", { name: /Lossless/ }).check();
+  assert.equal(await page.getByLabel("Max width (px)").inputValue(), "80");
+  await page.getByRole("button", { name: /Resize & convert to WebP/ }).click();
+  await page.getByRole("heading", { name: "Resize complete" }).waitFor();
+  const resizedWebpEvent = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download WebP", exact: true }).click();
+  const resizedWebp = await resizedWebpEvent; const resizedWebpPath = await resizedWebp.path(); assert.ok(resizedWebpPath);
+  const resizedWebpMetadata = await sharp(await readFile(resizedWebpPath)).metadata();
+  assert.deepEqual([resizedWebpMetadata.format, resizedWebpMetadata.width, resizedWebpMetadata.height, resizedWebpMetadata.hasAlpha], ["webp", 80, 80, true]);
+  await page.getByRole("button", { name: "Clear all" }).click();
+  await page.getByLabel("Select images to convert").setInputFiles([
+    { name: `${prefix}-custom-a.jpg`, mimeType: "image/jpeg", buffer: jpeg },
+    { name: `${prefix}-custom-b.png`, mimeType: "image/png", buffer: png },
+  ]);
+  await page.getByRole("radio", { name: /Each image — different settings/ }).check();
+  const firstEditor = page.getByRole("group", { name: `Resize ${prefix}-custom-a.jpg`, exact: true });
+  const secondEditor = page.getByRole("group", { name: `Resize ${prefix}-custom-b.png`, exact: true });
+  await firstEditor.getByLabel("Max width (px)").fill("60");
+  await secondEditor.getByRole("radio", { name: "Percentage", exact: true }).check();
+  await secondEditor.getByLabel("Size (% of original)").fill("");
+  assert.equal(await page.getByRole("button", { name: /Resize & convert to WebP/ }).isDisabled(), true);
+  await secondEditor.getByRole("button", { name: "30%", exact: true }).click();
+  await checkTheme("light"); await checkTheme("dark");
+  await page.getByRole("radio", { name: /All images — same settings/ }).check();
+  assert.equal(await page.locator(".individual-resize-row").count(), 0);
+  const batchEditor = page.getByRole("group", { name: "Resize dimensions", exact: true });
+  await batchEditor.getByRole("radio", { name: "Percentage", exact: true }).check();
+  for (const percent of [20, 30, 40, 50, 60, 70, 80]) assert.equal(await batchEditor.getByRole("button", { name: `${percent}%`, exact: true }).count(), 1);
+  await batchEditor.getByRole("button", { name: "50%", exact: true }).click();
+  await page.getByRole("button", { name: /Resize & convert to WebP/ }).click();
+  await page.getByRole("heading", { name: "Resize complete" }).waitFor();
+  assert.equal(await page.locator(".image-dimensions").first().innerText(), "200 × 120 → 100 × 60 px");
+  assert.equal(await page.locator(".image-dimensions").nth(1).innerText(), "100 × 100 → 50 × 50 px");
+  await page.getByRole("radio", { name: /Each image — different settings/ }).check();
+  assert.equal(await firstEditor.getByLabel("Max width (px)").inputValue(), "60");
+  assert.equal(await secondEditor.getByLabel("Size (% of original)").inputValue(), "30");
+  await page.getByRole("button", { name: /Resize & convert to WebP/ }).click();
+  await page.getByRole("heading", { name: "Resize complete" }).waitFor();
+  assert.equal(await page.locator(".image-dimensions").first().innerText(), "200 × 120 → 60 × 36 px");
+  assert.equal(await page.locator(".image-dimensions").nth(1).innerText(), "100 × 100 → 30 × 30 px");
+  await page.screenshot({ path: "test-results/individual-resize-dark.png", fullPage: true });
   assert.deepEqual(errors, []);
-  console.log("PASS: system light/dark themes, readable contrast, live theme changes preserving state, previews, quality controls, batch ZIP, single WebP (including partial failure), clear, unsupported file error, mobile layout, no runtime errors.");
+  console.log("PASS: tool selection, separate workflows, original-format JPEG/PNG resize and ZIP, resize-to-WebP, system themes, readable contrast, live state preservation, previews, quality, adaptive downloads, errors, mobile layout, no runtime errors.");
 } finally {
   await browser.close();
   const output = path.resolve(process.env.TEST_OUTPUT_DIR ?? "data/output");

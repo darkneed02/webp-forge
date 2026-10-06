@@ -1,11 +1,12 @@
-import { ForgeWorkspace } from "@/components/forge-workspace";
+import { ApplicationShell } from "@/components/application-shell";
 import { Icon } from "@/components/icon";
-import { publicConfig } from "@/lib/config";
 import Link from "next/link";
-export const dynamic = "force-dynamic";
 export default function Home() {
-  return <div className="app-shell"><header className="app-header"><div className="header-inner"><Link className="wordmark" href="/" aria-label="WebP Forge home"><span className="brand-icon"><Icon name="forge" size={20} /></span>WebP <strong>Forge</strong></Link><span className="local-badge"><i /> LOCAL WORKSPACE</span></div></header>
-    <main className="page-container"><div className="page-heading"><div><div className="eyebrow">LESS WEIGHT. SAME IMPACT.</div><h1>Make room for <span>better images.</span></h1><p>Fast batch image conversion for the web.</p></div><span className="version-tag">WEBP FORGE / V1.0</span></div><ForgeWorkspace config={publicConfig} /></main>
-    <footer className="app-footer"><span><i /> All systems local</span><p>Built for a lighter web.</p><span>JPG / PNG <Icon name="arrow" size={13} /> WEBP</span></footer>
-  </div>;
+  return <ApplicationShell title="What would you like to do?" subtitle="Choose a tool. Your images stay on your machine.">
+    <div className="tool-grid">
+      <Link href="/resize" className="tool-card"><span className="tool-icon"><Icon name="image" size={28} /></span><h2>Resize images</h2><p>Make images smaller while keeping their proportions. Keep the original format or save as WebP.</p><span className="tool-action">Resize images <Icon name="arrow" size={18} /></span></Link>
+      <Link href="/convert" className="tool-card"><span className="tool-icon"><Icon name="forge" size={28} /></span><h2>Convert to WebP</h2><p>Turn JPG, JPEG, and PNG into lighter WebP files. Choose your quality and convert a whole batch.</p><span className="tool-action">Convert to WebP <Icon name="arrow" size={18} /></span></Link>
+    </div>
+    <p className="tool-privacy"><Icon name="shield" size={16} />Local processing · Automatic folder output · Single image or batch ZIP downloads</p>
+  </ApplicationShell>;
 }
