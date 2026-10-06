@@ -32,6 +32,16 @@ Checked on 2026-10-06 after introducing system light/dark themes and direct sing
 - Calculated palette contrast passed 4.5:1 for sampled body, card, secondary text, button, success, error, and warning pairs in both themes. This checks the defined colors, not a browser screenshot.
 - Browser acceptance now covers system theme changes without losing selections, contrast, mobile layouts, and adaptive downloads. Running it was attempted; Chromium launch was denied by the sandbox before those browser checks could execute.
 
+## Git workflow update
+
+Checked on 2026-10-06:
+
+- Shell syntax checks, TypeScript, lint, and all nine unit tests passed.
+- Three Git workflow tests use isolated disposable repositories. They verify setup with existing working changes, idempotence, task branch commits, rejection of direct `main`/`develop` commits, invalid names and detached HEAD, merge commits, and preservation of an existing different hook configuration.
+- The actual repository setup was attempted using `npm run git:setup`. Creating `develop` failed because writing `.git/refs/heads/develop.lock` is denied. The actual repository still has only `main`; the new workflow files are uncommitted and `core.hooksPath` is not enabled here.
+- Run `npm run git:setup` from an unrestricted Terminal to activate the workflow for this repository. No release tag, remote connection, merge, or push was made.
+- Follow-up verification after the user ran setup: `main`, `develop`, and `chore/git-workflow` now exist, the active branch is `chore/git-workflow`, and local `core.hooksPath` is `.githooks`. Both shell files are executable and the pre-commit guard accepts this task branch. The setup's earlier permission failure is resolved by the user's Terminal run; workflow changes are still pending commit at this verification point.
+
 ## Remaining acceptance checks
 
 On a machine/session with Docker and browser access:

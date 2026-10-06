@@ -18,7 +18,7 @@ Fast batch image conversion for the web. A local Next.js application that conver
 
 For Docker: Docker Desktop on macOS/Windows, or Docker Engine with the Compose plugin on Linux. Allow several GB of free disk space for the image build and converted files.
 
-For development: Node.js 22 LTS and npm. Sharp runs on the server; the browser does not perform conversion. Platform-specific native Sharp dependencies are installed by npm.
+For development: Node.js 22 LTS, npm, and Git. Use Terminal or Git Bash for the Git workflow setup and checks. Sharp runs on the server; the browser does not perform conversion. Platform-specific native Sharp dependencies are installed by npm.
 
 ## Quick start with Docker
 
@@ -166,6 +166,40 @@ Savings compare successfully converted inputs with their outputs; failed images 
 - **Disk or temporary space is full:** free host output space, lower concurrency, or increase the tmpfs size in Compose when raising upload limits.
 - **ZIP or download fails:** ensure the host output files still exist. Retry the download after transient failures. If the app restarted or the session expired, retrieve files from the host folder or convert again.
 - **Local development tries to write `/app`:** override Docker environment paths in `.env.local` with repository-relative paths.
+
+## What belongs in Git
+
+Branch, commit, testing, and release rules are in [CONTRIBUTING.md](CONTRIBUTING.md). Start each independent feature or bug fix on a separate task branch. `main` is stable; `develop` is for integration/testing. Run `npm run git:setup` once per clone to create the local branch structure and enable the commit guard.
+
+| Include in the repository | Keep local; excluded by `.gitignore` |
+| --- | --- |
+| Application source: `app/`, `components/`, `lib/`, `instrumentation.ts` | Installed dependencies: `node_modules/` |
+| Automated tests: `tests/` | Screenshots and reports: `test-results/`, `playwright-report/`, `coverage/` |
+| Public application assets: `public/` | Uploaded and converted images: `data/`, `output/`, `uploads/` |
+| `package.json` and **`package-lock.json`** | Generated builds and types: `.next/`, `out/`, `dist/`, `build/`, `next-env.d.ts`, `*.tsbuildinfo` |
+| TypeScript, Next.js, Tailwind/PostCSS, ESLint, and shadcn configuration | Private `.env` files, including `.env.local` and `.env.production` |
+| Dockerfile, Compose, entrypoint, `.dockerignore`, `.gitignore` | Logs, caches, editor settings, and operating system files |
+| Sanitized `.env.example` | Actual personal paths, credentials, and runtime configuration values in local environment files |
+| README, contributor guidance, third-party notices, validation notes | Temporary files created while running or testing the app |
+| `data/output/.gitkeep` and `data/uploads/.gitkeep` | Everything else inside those runtime directories |
+
+Keep the npm lockfile so collaborators and Docker use the same dependency versions. Application assets and intentional test fixtures can be committed; image extensions are **not** globally ignored. Keep private images in the runtime folders above. If a custom host output directory is inside the repository, add its exact directory to `.gitignore` too, or place it outside the repository.
+
+Review inclusion before committing:
+
+```bash
+git status --short                     # Pending repository changes
+git status --ignored --short           # Include ignored local files
+git ls-files -ci --exclude-standard    # Tracked files now matching ignore rules
+```
+
+Ignore rules do not remove files that were already tracked. For the generated Next.js type declaration, stop tracking it while retaining the local file:
+
+```bash
+git rm --cached -- next-env.d.ts
+```
+
+Next.js regenerates that file when development or a build starts. Do not use force-add for private environment files or runtime images.
 
 ## Project structure
 
