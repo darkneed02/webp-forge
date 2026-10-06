@@ -171,6 +171,8 @@ Savings compare successfully converted inputs with their outputs; failed images 
 
 Branch, commit, testing, and release rules are in [CONTRIBUTING.md](CONTRIBUTING.md). Start each independent feature or bug fix on a separate task branch. `main` is stable; `develop` is for integration/testing. Run `npm run git:setup` once per clone to create the local branch structure and enable the commit guard.
 
+Commit the hook template `.githooks/pre-commit.sh`. The installed `.githooks/pre-commit` is generated locally and ignored, allowing it to keep working across branch switches.
+
 | Include in the repository | Keep local; excluded by `.gitignore` |
 | --- | --- |
 | Application source: `app/`, `components/`, `lib/`, `instrumentation.ts` | Installed dependencies: `node_modules/` |

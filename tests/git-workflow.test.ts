@@ -30,7 +30,8 @@ async function fixture() {
     await git("config", "--unset", "core.hooksPath");
     await mkdir(path.join(directory, ".githooks"));
     await mkdir(path.join(directory, "scripts"));
-    await copyFile(path.join(source, ".githooks/pre-commit"), path.join(directory, ".githooks/pre-commit"));
+    await copyFile(path.join(source, ".githooks/pre-commit.sh"), path.join(directory, ".githooks/pre-commit.sh"));
+    await writeFile(path.join(directory, ".gitignore"), "/.githooks/pre-commit\n");
     await copyFile(path.join(source, "scripts/setup-git-workflow.sh"), path.join(directory, "scripts/setup-git-workflow.sh"));
     const setup = () => execute("sh", ["scripts/setup-git-workflow.sh"], { cwd: directory, env });
     const change = async (text: string) => { await writeFile(path.join(directory, "README.md"), text); await git("add", "README.md"); };
@@ -57,10 +58,14 @@ test("commit guard blocks protected, invalid and detached branches, allows task 
   const repo = await fixture();
   try {
     await repo.setup();
+    // Track only templates/configuration, exactly as a real repository does.
+    // Main and develop remain at the baseline without those tracked files.
+    await repo.git("add", ".gitignore", ".githooks/pre-commit.sh", "scripts/setup-git-workflow.sh");
     await repo.change("workflow change\n");
     await repo.git("commit", "-m", "chore: test workflow");
     for (const branch of ["main", "develop"]) {
       await repo.git("switch", branch);
+      assert.ok((await readFile(path.join(repo.directory, ".githooks/pre-commit"), "utf8")).includes("Commit blocked"), "Installed hook survives switching to branches without its template");
       const before = await repo.git("rev-parse", "HEAD");
       await repo.change("must not commit here\n");
       await assert.rejects(() => repo.git("commit", "-m", "Attempt direct commit"), /Commit blocked/);

@@ -21,7 +21,7 @@ Run in Terminal or Git Bash:
 npm run git:setup
 ```
 
-This creates `develop` from `main` if needed, checks out `chore/git-workflow` when starting on a protected branch, and enables `.githooks`. Existing working files are preserved. It does not commit, merge, tag, push, or connect a remote. It refuses to replace a different existing `core.hooksPath` setting. Each new clone must run setup once.
+This creates `develop` from `main` if needed, checks out `chore/git-workflow` when starting on a protected branch, and enables `.githooks`. The repository contains `.githooks/pre-commit.sh`; setup copies it to the ignored local `.githooks/pre-commit` so branch switches cannot remove the installed guard. Existing working files are preserved. Setup does not commit, merge, tag, push, or connect a remote. It refuses to replace a different existing `core.hooksPath` setting. Each new clone must run setup once, and rerun it after changes to the hook template.
 
 If an agent sandbox cannot write `.git`, run setup in your own Terminal. Until setup succeeds, the branch structure and local commit guard are not active.
 

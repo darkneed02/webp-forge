@@ -41,6 +41,7 @@ Checked on 2026-10-06:
 - The actual repository setup was attempted using `npm run git:setup`. Creating `develop` failed because writing `.git/refs/heads/develop.lock` is denied. The actual repository still has only `main`; the new workflow files are uncommitted and `core.hooksPath` is not enabled here.
 - Run `npm run git:setup` from an unrestricted Terminal to activate the workflow for this repository. No release tag, remote connection, merge, or push was made.
 - Follow-up verification after the user ran setup: `main`, `develop`, and `chore/git-workflow` now exist, the active branch is `chore/git-workflow`, and local `core.hooksPath` is `.githooks`. Both shell files are executable and the pre-commit guard accepts this task branch. The setup's earlier permission failure is resolved by the user's Terminal run; workflow changes are still pending commit at this verification point.
+- The initial workflow and tracking changes were then committed as `107fdfd`. Verification found that the installed hook must remain local rather than tracked: setup now installs it from `.githooks/pre-commit.sh`, while `.githooks/pre-commit` is ignored. The nine tests passed again, including switching to baseline `main`/`develop` branches that do not contain the tracked template and verifying that their direct commits are still blocked.
 
 ## Remaining acceptance checks
 

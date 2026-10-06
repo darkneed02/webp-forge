@@ -31,6 +31,7 @@ node_modules/
 npm-debug.log*
 
 # Machine-specific editor and operating system files
+/.githooks/pre-commit
 /.idea/
 /.vscode/
 .DS_Store

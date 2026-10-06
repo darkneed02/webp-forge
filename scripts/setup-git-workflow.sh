@@ -34,6 +34,8 @@ case "$branch" in
     ;;
 esac
 
+# Keep the installed hook untracked so switching branches cannot remove it.
+cp .githooks/pre-commit.sh .githooks/pre-commit
 chmod +x .githooks/pre-commit
 git config --local core.hooksPath .githooks
 echo "Git workflow enabled. Current branch: $(git branch --show-current)"
