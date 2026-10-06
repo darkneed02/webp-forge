@@ -1,0 +1,103 @@
+import assert from "node:assert/strict";
+import sharp from "sharp";
+import { randomUUID } from "node:crypto";
+import { readFile, readdir, unlink } from "node:fs/promises";
+import path from "node:path";
+import { unzipSync } from "fflate";
+
+const base = process.env.TEST_BASE_URL ?? "http://127.0.0.1:3000";
+const output = path.resolve(process.env.TEST_OUTPUT_DIR ?? "data/output");
+const uploads = path.resolve(process.env.TEST_UPLOAD_DIR ?? "data/uploads");
+const prefix = `forge-test-${randomUUID().slice(0, 8)}`;
+const saved: string[] = [];
+// Exercise the exact route handlers without sockets when a sandbox blocks listening.
+// The default transport remains HTTP for real Next.js and Docker acceptance testing.
+const routes = process.env.TEST_IN_PROCESS === "1" ? {
+  "/api/health": (await import("../app/api/health/route")).GET,
+  "/api/batches": (await import("../app/api/batches/route")).POST,
+  "/api/convert": (await import("../app/api/convert/route")).POST,
+  "/api/download": (await import("../app/api/download/route")).GET,
+  "/api/zip": (await import("../app/api/zip/route")).GET,
+} : null;
+async function request(url: string, init?: RequestInit) {
+  if (!routes) return fetch(url, init);
+  const target = new URL(url);
+  const route = routes[target.pathname as keyof typeof routes];
+  assert.ok(route, `Unknown test route ${target.pathname}`);
+  const headers = new Headers(init?.headers); headers.set("host", target.host);
+  return route(new Request(url, { ...init, headers }));
+}
+type Input = { name: string; mime: string; data: Buffer };
+type Result = { id: string; filename: string; outputSize: number; originalSize: number };
+async function json<T>(response: Response) { const body = await response.json(); assert.ok(response.ok, JSON.stringify(body)); return body as T; }
+async function batch(inputs: Input[], lossless = false) {
+  return json<{ batchId: string; fileIds: string[] }>(await request(`${base}/api/batches`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files: inputs.map(f => ({ name: f.name, size: f.data.length, mime: f.mime })), quality: 80, lossless }) }));
+}
+async function convert(id: string, fileId: string, input: Input) {
+  return request(`${base}/api/convert?batch=${id}&id=${fileId}`, { method: "POST", headers: { "Content-Type": input.mime }, body: new Uint8Array(input.data) });
+}
+async function download(batchId: string, id: string) {
+  const response = await request(`${base}/api/download?batch=${batchId}&id=${id}`); assert.equal(response.status, 200);
+  return Buffer.from(await response.arrayBuffer());
+}
+async function verifyOutput(result: Result, data: Buffer) {
+  saved.push(result.filename);
+  assert.equal(result.outputSize, data.length);
+  assert.deepEqual(await readFile(path.join(output, result.filename)), data);
+  assert.equal((await sharp(data).metadata()).format, "webp");
+}
+try {
+  if (process.env.TEST_IN_PROCESS === "1") await (await import("../lib/config")).initializeStorage();
+  assert.equal((await request(`${base}/api/health`)).status, 200);
+  const jpgData = await sharp({ create: { width: 160, height: 100, channels: 3, background: "#c45532" } }).jpeg().toBuffer();
+  const raw = Buffer.alloc(80 * 60 * 4);
+  for (let i = 0; i < raw.length; i += 4) { raw[i] = 30; raw[i + 1] = 130; raw[i + 2] = 180; raw[i + 3] = (i / 4) % 3 === 0 ? 0 : (i / 4) % 3 === 1 ? 128 : 255; }
+  const pngData = await sharp(raw, { raw: { width: 80, height: 60, channels: 4 } }).png().toBuffer();
+  const jpg: Input = { name: `${prefix}-product.jpg`, mime: "image/jpeg", data: jpgData };
+  const png: Input = { name: `${prefix}-transparent.png`, mime: "image/png", data: pngData };
+  const first = await batch([jpg, png], true);
+  const pendingZip = await request(`${base}/api/zip?batch=${first.batchId}`); assert.equal(pendingZip.status, 404);
+  const results = await Promise.all([jpg, png].map(async (input, index) => json<Result>(await convert(first.batchId, first.fileIds[index], input))));
+  for (const result of results) await verifyOutput(result, await download(first.batchId, result.id));
+  const webpPixels = await sharp(await download(first.batchId, results[1].id)).ensureAlpha().raw().toBuffer();
+  for (let i = 3; i < raw.length; i += 4) assert.equal(webpPixels[i], raw[i], "PNG alpha must survive conversion");
+  const originalDownload = await download(first.batchId, results[0].id);
+  const again = await batch([jpg]);
+  const conflict = await json<Result>(await convert(again.batchId, again.fileIds[0], jpg));
+  assert.equal(conflict.filename, `${prefix}-product-1.webp`);
+  await verifyOutput(conflict, await download(again.batchId, conflict.id));
+  assert.deepEqual(await download(first.batchId, results[0].id), originalDownload);
+  const zipResponse = await request(`${base}/api/zip?batch=${first.batchId}`); assert.equal(zipResponse.status, 200);
+  const zipped = unzipSync(new Uint8Array(await zipResponse.arrayBuffer()));
+  assert.deepEqual(Object.keys(zipped).sort(), results.map(r => r.filename).sort());
+  for (const result of results) assert.deepEqual(Buffer.from(zipped[result.filename]), await readFile(path.join(output, result.filename)));
+  const duplicate = await convert(first.batchId, first.fileIds[0], jpg); assert.equal(duplicate.status, 409);
+  const crossSite = await request(`${base}/api/batches`, { method: "POST", headers: { Origin: "https://untrusted.example", "Content-Type": "application/json" }, body: "{}" }); assert.equal(crossSite.status, 403);
+  const malformed = await request(`${base}/api/batches`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{" }); assert.equal(malformed.status, 400);
+  for (const details of [ { name: "attack.svg", mime: "image/svg+xml", size: 50 }, { name: "wrong.png", mime: "image/jpeg", size: 50 }, { name: "large.jpg", mime: "image/jpeg", size: 31 * 1024 * 1024 } ]) {
+    const response = await request(`${base}/api/batches`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files: [details], quality: 80, lossless: false }) }); assert.equal(response.status, 400);
+  }
+  const mixedInputs = [jpg, png, { name: `${prefix}-corrupt.png`, mime: "image/png", data: Buffer.from("not an image") }, { name: `${prefix}-spoof.png`, mime: "image/png", data: jpgData }];
+  const mixed = await batch(mixedInputs);
+  let successCount = 0;
+  for (const [index, input] of mixedInputs.entries()) {
+    const response = await convert(mixed.batchId, mixed.fileIds[index], input);
+    if (index > 1) assert.equal(response.status, 400);
+    else {
+      const result = await json<Result>(response); const data = await download(mixed.batchId, result.id);
+      await verifyOutput(result, data); successCount++;
+      if (index === 1) { const pixels = await sharp(data).ensureAlpha().raw().toBuffer(); for (let i = 3; i < raw.length; i += 4) assert.equal(pixels[i], raw[i], "Lossy WebP must preserve PNG alpha"); }
+    }
+  }
+  const mixedZip = await request(`${base}/api/zip?batch=${mixed.batchId}`); assert.equal(mixedZip.status, 200);
+  assert.equal(Object.keys(unzipSync(new Uint8Array(await mixedZip.arrayBuffer()))).length, successCount);
+  const inputs = Array.from({ length: 100 }, (_, index) => ({ ...jpg, name: `${prefix}-batch-${index}.jpg` }));
+  const many = await batch(inputs); let next = 0;
+  await Promise.all(Array.from({ length: 8 }, async () => { while (next < inputs.length) { const index = next++; const result = await json<Result>(await convert(many.batchId, many.fileIds[index], inputs[index])); await verifyOutput(result, await download(many.batchId, result.id)); } }));
+  const manyZip = await request(`${base}/api/zip?batch=${many.batchId}`); assert.equal(manyZip.status, 200);
+  assert.equal(Object.keys(unzipSync(new Uint8Array(await manyZip.arrayBuffer()))).length, 100);
+  assert.equal((await readdir(uploads)).filter(name => name.endsWith(".upload")).length, 0);
+  console.log("PASS: JPEG, alpha-preserving PNG, lossless, 100-image batch, conflicts, individual downloads, ZIP contents, corrupted/spoofed input, size/type validation, cross-site blocking, host output, temporary cleanup.");
+} finally {
+  for (const filename of saved) await unlink(path.join(output, filename)).catch(() => {});
+}

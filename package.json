@@ -1,0 +1,35 @@
+{
+  "name": "webp-forge",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --hostname 127.0.0.1",
+    "build": "next build --webpack",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "test:integration": "node --import tsx tests/integration.ts",
+    "test:browser": "node --import tsx tests/browser.ts"
+  },
+  "dependencies": {
+    "next": "16.2.7",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "sharp": "0.34.5",
+    "fflate": "0.8.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.3.0",
+    "tailwindcss": "4.3.0",
+    "typescript": "5.9.3",
+    "@types/node": "22.15.23",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "eslint": "9.39.4",
+    "eslint-config-next": "16.2.7",
+    "tsx": "4.22.4",
+    "playwright": "1.60.0"
+  },
+  "type": "module"
+}

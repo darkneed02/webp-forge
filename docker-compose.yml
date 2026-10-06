@@ -1,0 +1,21 @@
+services:
+  webp-forge:
+    build: .
+    init: true
+    ports:
+      - "127.0.0.1:${HOST_PORT:-3000}:3000"
+    environment:
+      OUTPUT_DIR: /app/data/output
+      UPLOAD_DIR: /app/data/uploads
+      WEBP_QUALITY: ${WEBP_QUALITY:-80}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-30}
+      MAX_FILES: ${MAX_FILES:-100}
+      CONVERSION_CONCURRENCY: ${CONVERSION_CONCURRENCY:-4}
+    volumes:
+      - type: bind
+        source: ${HOST_OUTPUT_DIR:-./output}
+        target: /app/data/output
+    tmpfs:
+      - /app/data/uploads:size=4g,mode=0700
+    restart: unless-stopped
+    stop_grace_period: 30s
