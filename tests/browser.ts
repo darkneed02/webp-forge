@@ -19,7 +19,7 @@ async function checkTheme(scheme: "light" | "dark") {
     const body = getComputedStyle(document.body);
     const card = getComputedStyle(document.querySelector(".card")!);
     const button = getComputedStyle(document.querySelector(".button-outline")!);
-    const input = document.querySelector("#resize-width");
+    const input = document.querySelector(".resize-controls input[type=number]");
     const inputStyles = input ? getComputedStyle(input) : undefined;
     return {
       scheme: getComputedStyle(document.documentElement).colorScheme,
@@ -169,6 +169,38 @@ try {
   const resizedWebp = await resizedWebpEvent; const resizedWebpPath = await resizedWebp.path(); assert.ok(resizedWebpPath);
   const resizedWebpMetadata = await sharp(await readFile(resizedWebpPath)).metadata();
   assert.deepEqual([resizedWebpMetadata.format, resizedWebpMetadata.width, resizedWebpMetadata.height, resizedWebpMetadata.hasAlpha], ["webp", 80, 80, true]);
+  await page.getByRole("button", { name: "Clear all" }).click();
+  await page.getByLabel("Select images to convert").setInputFiles([
+    { name: `${prefix}-custom-a.jpg`, mimeType: "image/jpeg", buffer: jpeg },
+    { name: `${prefix}-custom-b.png`, mimeType: "image/png", buffer: png },
+  ]);
+  await page.getByRole("radio", { name: /Each image — different settings/ }).check();
+  const firstEditor = page.getByRole("group", { name: `Resize ${prefix}-custom-a.jpg`, exact: true });
+  const secondEditor = page.getByRole("group", { name: `Resize ${prefix}-custom-b.png`, exact: true });
+  await firstEditor.getByLabel("Max width (px)").fill("60");
+  await secondEditor.getByRole("radio", { name: "Percentage", exact: true }).check();
+  await secondEditor.getByLabel("Size (% of original)").fill("");
+  assert.equal(await page.getByRole("button", { name: /Resize & convert to WebP/ }).isDisabled(), true);
+  await secondEditor.getByRole("button", { name: "30%", exact: true }).click();
+  await checkTheme("light"); await checkTheme("dark");
+  await page.getByRole("radio", { name: /All images — same settings/ }).check();
+  assert.equal(await page.locator(".individual-resize-row").count(), 0);
+  const batchEditor = page.getByRole("group", { name: "Resize dimensions", exact: true });
+  await batchEditor.getByRole("radio", { name: "Percentage", exact: true }).check();
+  for (const percent of [20, 30, 40, 50, 60, 70, 80]) assert.equal(await batchEditor.getByRole("button", { name: `${percent}%`, exact: true }).count(), 1);
+  await batchEditor.getByRole("button", { name: "50%", exact: true }).click();
+  await page.getByRole("button", { name: /Resize & convert to WebP/ }).click();
+  await page.getByRole("heading", { name: "Resize complete" }).waitFor();
+  assert.equal(await page.locator(".image-dimensions").first().innerText(), "200 × 120 → 100 × 60 px");
+  assert.equal(await page.locator(".image-dimensions").nth(1).innerText(), "100 × 100 → 50 × 50 px");
+  await page.getByRole("radio", { name: /Each image — different settings/ }).check();
+  assert.equal(await firstEditor.getByLabel("Max width (px)").inputValue(), "60");
+  assert.equal(await secondEditor.getByLabel("Size (% of original)").inputValue(), "30");
+  await page.getByRole("button", { name: /Resize & convert to WebP/ }).click();
+  await page.getByRole("heading", { name: "Resize complete" }).waitFor();
+  assert.equal(await page.locator(".image-dimensions").first().innerText(), "200 × 120 → 60 × 36 px");
+  assert.equal(await page.locator(".image-dimensions").nth(1).innerText(), "100 × 100 → 30 × 30 px");
+  await page.screenshot({ path: "test-results/individual-resize-dark.png", fullPage: true });
   assert.deepEqual(errors, []);
   console.log("PASS: tool selection, separate workflows, original-format JPEG/PNG resize and ZIP, resize-to-WebP, system themes, readable contrast, live state preservation, previews, quality, adaptive downloads, errors, mobile layout, no runtime errors.");
 } finally {

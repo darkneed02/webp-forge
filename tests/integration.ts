@@ -28,11 +28,11 @@ async function request(url: string, init?: RequestInit) {
   const headers = new Headers(init?.headers); headers.set("host", target.host);
   return route(new Request(url, { ...init, headers }));
 }
-type Input = { name: string; mime: string; data: Buffer };
+type Input = { name: string; mime: string; data: Buffer; resize?: ResizeOptions };
 type Result = ConversionResult;
 async function json<T>(response: Response) { const body = await response.json(); assert.ok(response.ok, JSON.stringify(body)); return body as T; }
 async function batch(inputs: Input[], lossless = false, resize?: ResizeOptions, outputFormat?: OutputFormat) {
-  return json<{ batchId: string; fileIds: string[] }>(await request(`${base}/api/batches`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files: inputs.map(f => ({ name: f.name, size: f.data.length, mime: f.mime })), quality: 80, lossless, resize, outputFormat }) }));
+  return json<{ batchId: string; fileIds: string[] }>(await request(`${base}/api/batches`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files: inputs.map(f => ({ name: f.name, size: f.data.length, mime: f.mime, resize: f.resize })), quality: 80, lossless, resize, outputFormat }) }));
 }
 async function convert(id: string, fileId: string, input: Input) {
   return request(`${base}/api/convert?batch=${id}&id=${fileId}`, { method: "POST", headers: { "Content-Type": input.mime }, body: new Uint8Array(input.data) });
@@ -98,9 +98,9 @@ try {
   }
   const mixedZip = await request(`${base}/api/zip?batch=${mixed.batchId}`); assert.equal(mixedZip.status, 200);
   assert.equal(Object.keys(unzipSync(new Uint8Array(await mixedZip.arrayBuffer()))).length, successCount);
-  const inputs = Array.from({ length: 100 }, (_, index) => ({ ...jpg, name: `${prefix}-batch-${index}.jpg` }));
+  const inputs: Input[] = Array.from({ length: 100 }, (_, index) => ({ ...jpg, name: `${prefix}-batch-${index}.jpg`, resize: index % 2 ? { percent: 50 } : undefined }));
   const many = await batch(inputs, false, { width: 40 }); let next = 0;
-  await Promise.all(Array.from({ length: 8 }, async () => { while (next < inputs.length) { const index = next++; const result = await json<Result>(await convert(many.batchId, many.fileIds[index], inputs[index])); await verifyOutput(result, await download(many.batchId, result.id)); assert.deepEqual([result.width, result.height], [40, 25]); } }));
+  await Promise.all(Array.from({ length: 8 }, async () => { while (next < inputs.length) { const index = next++; const result = await json<Result>(await convert(many.batchId, many.fileIds[index], inputs[index])); await verifyOutput(result, await download(many.batchId, result.id)); assert.deepEqual([result.width, result.height], index % 2 ? [80, 50] : [40, 25]); } }));
   const manyZip = await request(`${base}/api/zip?batch=${many.batchId}`); assert.equal(manyZip.status, 200);
   assert.equal(Object.keys(unzipSync(new Uint8Array(await manyZip.arrayBuffer()))).length, 100);
   // The same settings apply independently to landscape JPEG and transparent PNG.
@@ -167,12 +167,53 @@ try {
     const response = await request(`${base}/api/batches`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files: [{ name: jpg.name, mime: jpg.mime, size: jpg.data.length }], quality: 80, lossless: false, resize: { width: 40 }, outputFormat }) });
     assert.equal(response.status, 400);
   }
+  for (const outputFormat of ["original", "webp"] as const) {
+    // Three identically sized inputs must each produce their own requested dimensions.
+    const individualInputs: Input[] = [
+      { ...jpg, name: `${prefix}-individual-a.jpg`, resize: { width: 80 } },
+      { ...jpg, name: `${prefix}-individual-b.jpeg`, resize: { percent: 30 } },
+      { ...jpg, name: `${prefix}-individual-c.jpg`, resize: { height: 20 } },
+      { ...png, name: `${prefix}-individual-d.png`, resize: { percent: 50 } },
+    ];
+    const individualBatch = await batch(individualInputs, true, undefined, outputFormat);
+    const individualResults: Result[] = [];
+    for (const [index, input] of individualInputs.entries()) {
+      const result = await json<Result>(await convert(individualBatch.batchId, individualBatch.fileIds[index], input));
+      const data = await download(individualBatch.batchId, result.id); await verifyOutput(result, data); individualResults.push(result);
+      assert.deepEqual([result.width, result.height], [[80, 50], [48, 30], [32, 20], [40, 30]][index]);
+      assert.equal(result.format, outputFormat === "webp" ? "webp" : index === 3 ? "png" : "jpeg");
+      if (index === 3) assert.ok((await sharp(data).stats()).channels[3].min < 255);
+    }
+    const response = await request(`${base}/api/zip?batch=${individualBatch.batchId}`); assert.equal(response.status, 200);
+    const entries = unzipSync(new Uint8Array(await response.arrayBuffer()));
+    assert.deepEqual(Object.keys(entries).sort(), individualResults.map(item => item.filename).sort());
+    for (const item of individualResults) assert.deepEqual(Buffer.from(entries[item.filename]), await download(individualBatch.batchId, item.id));
+  }
+  for (const percent of [20, 30, 40, 50, 60, 70, 80, 100]) {
+    const inputs = [jpg, png]; const percentageBatch = await batch(inputs, false, { percent });
+    for (const [index, input] of inputs.entries()) {
+      const result = await json<Result>(await convert(percentageBatch.batchId, percentageBatch.fileIds[index], input));
+      await verifyOutput(result, await download(percentageBatch.batchId, result.id));
+      assert.deepEqual([result.width, result.height], index ? [Math.round(80 * percent / 100), Math.round(60 * percent / 100)] : [Math.round(160 * percent / 100), percent]);
+    }
+  }
+  const percentRotatedBatch = await batch([oriented], false, { percent: 50 });
+  const percentRotated = await json<Result>(await convert(percentRotatedBatch.batchId, percentRotatedBatch.fileIds[0], oriented));
+  await verifyOutput(percentRotated, await download(percentRotatedBatch.batchId, percentRotated.id));
+  assert.deepEqual([percentRotated.width, percentRotated.height], [50, 80]);
+  const tiny: Input = { name: `${prefix}-tiny.png`, mime: "image/png", data: await sharp({ create: { width: 1, height: 2, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0.5 } } }).png().toBuffer() };
+  const tinyBatch = await batch([tiny], false, { percent: 1 });
+  const tinyResult = await json<Result>(await convert(tinyBatch.batchId, tinyBatch.fileIds[0], tiny));
+  await verifyOutput(tinyResult, await download(tinyBatch.batchId, tinyResult.id)); assert.deepEqual([tinyResult.width, tinyResult.height], [1, 1]);
+  const invalidFile = { name: jpg.name, mime: jpg.mime, size: jpg.data.length, resize: { percent: 0 } };
+  const invalidIndividual = await request(`${base}/api/batches`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files: [invalidFile], resize: { percent: 50 }, quality: 80, lossless: false }) });
+  assert.equal(invalidIndividual.status, 400, "Invalid individual settings must not be hidden by valid batch defaults");
   for (const resize of [null, {}, [], { width: 0 }, { height: 1.5 }, { width: "40" }, { width: 16384 }, { height: -30 }]) {
     const response = await request(`${base}/api/batches`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files: [{ name: jpg.name, mime: jpg.mime, size: jpg.data.length }], quality: 80, lossless: false, resize }) });
     assert.equal(response.status, 400, `Invalid resize ${JSON.stringify(resize)} must be rejected before upload`);
   }
   assert.equal((await readdir(uploads)).filter(name => name.endsWith(".upload")).length, 0);
-  console.log("PASS: WebP conversion, original-format JPG/JPEG/PNG resize, resize-to-WebP, correct download MIME, mixed-format ZIP, alpha, lossless, 100-image batch, conflicts, invalid input/format/resize validation, EXIF, no enlargement, cross-site blocking, filesystem output, temporary cleanup.");
+  console.log("PASS: batch and per-image pixel/percentage resize, all percentage presets, EXIF, 1px minimum, Original/WebP outputs, alpha, mixed-settings 100-image batch, ZIP bytes, MIME, conflicts, validation, cross-site blocking, filesystem output, temporary cleanup.");
 } finally {
   for (const filename of saved) await unlink(path.join(output, filename)).catch(() => {});
 }

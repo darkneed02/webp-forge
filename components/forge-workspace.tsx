@@ -1,8 +1,8 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { ConversionOptions, ConversionResult, OutputFormat, PublicConfig, ResizeOptions, SelectedImage, TaskMode } from "@/lib/types";
-import { parseResizeOptions } from "@/lib/resize";
+import type { ConversionOptions, ConversionResult, OutputFormat, PublicConfig, ResizeOptions, ResizeScope, SelectedImage, TaskMode } from "@/lib/types";
+import { resizeFromSettings } from "@/lib/resize";
 import { DropZone } from "./drop-zone";
 import { ImageList } from "./image-list";
 import { QualitySelector, type Preset } from "./quality-selector";
@@ -24,12 +24,23 @@ export function ForgeWorkspace({ config, mode }: { config: PublicConfig; mode: T
   const [images, setImages] = useState<SelectedImage[]>([]);
   const [options, setOptions] = useState<ConversionOptions>({ quality: config.quality, lossless: false });
   const [preset, setPreset] = useState<Preset>(config.quality === 80 ? "Balanced" : "Custom");
-  const [resize, setResize] = useState<ResizeSettingsValue>({ enabled: resizeMode, width: "1920", height: "" });
+  const [resize, setResize] = useState<ResizeSettingsValue>({ enabled: resizeMode, method: "pixels", width: "1920", height: "", percent: "50" });
+  const [resizeScope, setResizeScope] = useState<ResizeScope>("batch");
   const [outputFormat, setOutputFormat] = useState<OutputFormat>(resizeMode ? "original" : "webp");
   let resizeOptions: ResizeOptions | undefined; let resizeError: string | undefined;
-  if (resizeMode || resize.enabled) {
-    try { resizeOptions = parseResizeOptions({ width: resize.width.trim() ? Number(resize.width) : undefined, height: resize.height.trim() ? Number(resize.height) : undefined }); }
-    catch (error) { resizeError = error instanceof Error ? error.message : "Invalid resize settings."; }
+  const resizeActive = resizeMode || resize.enabled;
+  const imageResizeOptions = new Map<string, ResizeOptions>();
+  const imageResizeErrors = new Map<string, string>();
+  if (resizeActive) {
+    if (resizeScope === "batch") {
+      try { resizeOptions = resizeFromSettings(resize); }
+      catch (error) { resizeError = error instanceof Error ? error.message : "Invalid resize settings."; }
+    } else {
+      for (const image of images) {
+        try { imageResizeOptions.set(image.id, resizeFromSettings(image.resizeSettings ?? resize)); }
+        catch (error) { const message = error instanceof Error ? error.message : "Invalid resize settings."; imageResizeErrors.set(image.id, message); resizeError ??= `${image.file.name}: ${message}`; }
+      }
+    }
   }
   const [busy, setBusy] = useState(false);
   const [batchId, setBatchId] = useState<string | null>(null);
@@ -54,7 +65,7 @@ export function ForgeWorkspace({ config, mode }: { config: PublicConfig; mode: T
       if (!file.size || file.size > config.maxUploadMB * 1024 * 1024) { errors.push(`${file.name}: must be non-empty and at most ${config.maxUploadMB} MB.`); continue; }
       if (images.length + accepted.length >= config.maxFiles) { errors.push(`A batch can contain up to ${config.maxFiles} images.`); break; }
       const preview = URL.createObjectURL(file); previews.current.add(preview);
-      accepted.push({ id: crypto.randomUUID(), file, preview, status: "Ready" });
+      accepted.push({ id: crypto.randomUUID(), file, preview, status: "Ready", resizeSettings: resizeScope === "individual" ? { ...resize } : undefined });
     }
     setError(errors.length ? errors.slice(0, 3).join(" ") : null);
     if (accepted.length) { resetResults(); setImages(previous => [...previous.map(image => ({ ...image, status: "Ready" as const, error: undefined, result: undefined })), ...accepted]); }
@@ -67,6 +78,11 @@ export function ForgeWorkspace({ config, mode }: { config: PublicConfig; mode: T
     setError(null);
   }
   function update(id: string, patch: Partial<SelectedImage>) { setImages(previous => previous.map(image => image.id === id ? { ...image, ...patch } : image)); }
+  function changeResizeScope(scope: ResizeScope) {
+    if (runLock.current) return;
+    if (scope === "individual") setImages(previous => previous.map(image => ({ ...image, resizeSettings: image.resizeSettings ?? { ...resize } })));
+    setResizeScope(scope);
+  }
   async function convert() {
     if (runLock.current || !images.length) return;
     if (resizeError) { setError(resizeError); return; }
@@ -76,7 +92,7 @@ export function ForgeWorkspace({ config, mode }: { config: PublicConfig; mode: T
     try {
       const batch = await responseJson<{ batchId: string; fileIds: string[] }>(await fetch("/api/batches", {
         method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
-        body: JSON.stringify({ ...options, outputFormat, resize: resizeOptions, files: images.map(image => ({ name: image.file.name, size: image.file.size, mime: image.file.type || (image.file.name.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg") })) })
+        body: JSON.stringify({ ...options, outputFormat, resize: resizeOptions, files: images.map(image => ({ name: image.file.name, size: image.file.size, mime: image.file.type || (image.file.name.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg"), resize: resizeActive && resizeScope === "individual" ? imageResizeOptions.get(image.id) : undefined })) })
       }));
       setBatchId(batch.batchId);
       let next = 0;
@@ -119,13 +135,13 @@ export function ForgeWorkspace({ config, mode }: { config: PublicConfig; mode: T
     {error && <div className="error-banner" role="alert"><span>{error}</span><Button variant="ghost" size="icon" aria-label="Dismiss error" onClick={() => setError(null)}><Icon name="close" size={16} /></Button></div>}
     <div className="workspace-grid"><div className="main-column">
       <DropZone onFiles={addFiles} disabled={busy} maxFiles={config.maxFiles} maxUploadMB={config.maxUploadMB} />
-      <ImageList images={images} disabled={busy || downloading !== null} onRemove={remove} onClear={() => remove()} onDownload={image => void download(image)} downloading={downloading} />
+      <ImageList images={images} disabled={busy || downloading !== null} onRemove={remove} onClear={() => remove()} onDownload={image => void download(image)} downloading={downloading} resizeIndividual={resizeActive && resizeScope === "individual"} resizeDefaults={resize} resizeErrors={imageResizeErrors} onResizeChange={(id, value) => { if (!runLock.current) update(id, { resizeSettings: value }); }} />
       {(busy || finished) && <ConversionProgress completed={completed} total={images.length} busy={busy} mode={mode} />}
       <div className="privacy-note"><Icon name="shield" size={15} /><span>Processed locally. Your images stay on your machine.</span></div>
     </div><aside className="settings-column">
       {resizeMode && <OutputFormatSelector value={outputFormat} onChange={setOutputFormat} disabled={busy} />}
       {outputFormat === "webp" && <QualitySelector preset={preset} options={options} onChange={(next, value) => { setPreset(next); setOptions(value); }} disabled={busy} />}
-      <ResizeSettings value={resize} onChange={setResize} disabled={busy} error={resizeError} required={resizeMode} />
+      <ResizeSettings value={resize} onChange={setResize} disabled={busy} error={resizeScope === "batch" ? resizeError : undefined} required={resizeMode} scope={resizeScope} onScopeChange={changeResizeScope} />
       <Button className="convert-button" disabled={busy || !images.length || !!resizeError || downloading !== null} onClick={() => void convert()}><Icon name={busy ? "spinner" : "forge"} className={busy ? "spin" : undefined} />{busy ? resizeMode ? "Processing…" : "Converting…" : actionLabel}{!busy && images.length > 0 && <span>{images.length}</span>}{!busy && <Icon name="arrow" size={16} />}</Button>
       {finished && <ResultSummary images={images} onDownload={image => void download(image)} downloading={downloading !== null} mode={mode} />}
       <div className="output-note"><div><Icon name="folder" size={18} /><strong>Saved, automatically.</strong></div><p>Every converted image goes straight to your configured output folder.</p><span>Original files are never changed.</span></div>

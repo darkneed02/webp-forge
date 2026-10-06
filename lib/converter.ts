@@ -5,7 +5,7 @@ import { config } from "./config";
 import { AppError } from "./errors";
 import { reserveOutput, removeFile, validateInput } from "./file-utils";
 import { ConversionQueue } from "./queue";
-import { parseResizeOptions } from "./resize";
+import { parseResizeOptions, resizeDimensions } from "./resize";
 import { parseOutputFormat, resolveOutputFormat } from "./output-format";
 import type { ConversionOptions } from "./types";
 
@@ -33,7 +33,7 @@ export async function convertImage(input: string, name: string, mime: string, op
   const output = await reserveOutput(config.outputDir, name, target.extension);
   try {
     image.rotate();
-    if (resize) image.resize({ ...resize, fit: "inside", withoutEnlargement: true });
+    if (resize) image.resize({ ...resizeDimensions(resize, originalWidth, originalHeight), fit: "inside", withoutEnlargement: true });
     let width = originalWidth; let height = originalHeight;
     image.on("info", info => { width = info.width; height = info.height; });
     if (target.format === "webp") image.webp(options.lossless ? { lossless: true } : { quality: options.quality });

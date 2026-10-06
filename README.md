@@ -13,7 +13,7 @@ Fast batch image processing for the web. A local Next.js application that resize
 - Choose Resize images or Convert to WebP from the home page. Resize keeps each image's original format by default, or converts to WebP in the same operation.
 - The results download button saves the output image directly when one image succeeds, or one ZIP when multiple images succeed.
 - PNG transparency, automatic EXIF orientation, and metadata removal.
-- Optional batch resizing by maximum width, height, or both, preserving proportions without cropping or enlargement. Results show original and output dimensions.
+- Batch or per-image resizing by pixel bounds or percentage, with 20–80% presets, preserving proportions without cropping or enlargement. Results show original and output dimensions.
 - Validated file extension, MIME type, decoded image format, file count, upload byte count, and a 40-megapixel decoded image limit. Animated PNG is rejected in V1.
 
 ## Requirements
@@ -150,7 +150,11 @@ The image uses a multi-stage Debian-based Node build, installs Sharp's Linux bin
 
 The home page lets you choose **Resize images** (`/resize`) or **Convert to WebP** (`/convert`). Use **Choose another tool** to return home; a new tool starts with an empty queue and its own defaults.
 
-In **Resize images**, enter a maximum width and/or height in pixels (whole numbers from 1 to 16383). Leave one field empty to calculate it from the image's proportions. For example, a 2400 × 1600 image with width `1200` becomes 1200 × 800; a `1200` × `600` bounding box produces 900 × 600. Smaller images keep their dimensions. Settings apply to the whole batch.
+In **Resize images**, choose **All images — same settings** (default) to set a size once for the whole batch, or **Each image — different settings** to edit the controls under each uploaded image. Individual settings start from the current batch settings and remain saved when switching scopes; all-images mode uses only the batch settings. Newly added images in individual mode also start from the current batch settings.
+
+Choose **Pixels** for a maximum width and/or height (whole numbers from 1 to 16383). Leave one field empty to calculate it from the image's proportions. For example, a 2400 × 1600 image with width `1200` becomes 1200 × 800; a `1200` × `600` bounding box produces 900 × 600. Smaller images keep their dimensions.
+
+Choose **Percentage** for 20%, 30%, 40%, 50%, 60%, 70%, or 80% presets, or enter a whole number from 1–100. The percentage denotes the remaining width and height: 50% turns 2400 × 1600 into 1200 × 800. It does not specify a byte-size reduction. Bounds are rounded to pixels (minimum 1 px), then fitted proportionally. Both scopes support pixels and percentages, including different methods within one batch. Percentage calculation uses the correctly oriented original image each time, so rerunning a batch does not shrink previous outputs again.
 
 **Original format** is the resize default: `.jpg` stays `.jpg`, `.jpeg` stays `.jpeg`, and `.png` stays `.png`, even in a mixed batch. Extension casing is normalized to lowercase. JPEG outputs are re-encoded at quality 90; PNG outputs preserve transparency. Select **WebP** to resize and convert in one operation, with the existing quality presets, custom quality, and lossless encoding. Resizing itself changes pixels even when WebP encoding is lossless.
 

@@ -65,6 +65,17 @@ Checked on `feature/image-resize` on 2026-10-06:
 - `docker compose build` again failed on a denied Buildx activity-file write, and production HTTP startup on port 3001 again failed with `EPERM`. The new flow has not been verified in a newly built Docker container or through its host bind mount.
 - This is a related follow-up on the existing resize feature branch. No protected branch merge, release version bump, tag, or push was performed.
 
+## Per-image and percentage resize settings
+
+Checked on `feature/image-resize` on 2026-10-06 as a related resize follow-up:
+
+- Strict TypeScript, ESLint, all 18 unit tests, and the production Next.js build passed.
+- Unit checks cover percentage validation, mutual exclusion of pixel/percentage values, rounding and the 1 px minimum, batch fallback vs individual overrides, manifest snapshots, and separate DOM IDs/values for each image editor.
+- In-process route/Sharp acceptance passed for mixed per-image width/height/percentage settings with Original and WebP output, all 20–80% presets plus 100%, EXIF orientation, tiny images, PNG alpha, ZIP bytes, download MIME, invalid individual settings, and a 100-image batch mixing batch defaults with individual percentages. Upload cleanup and filename conflict checks also passed.
+- Browser acceptance now covers editing individual sizes, invalid percentages, presets, switching scopes while retaining individual settings, shared 50% output, individual output, and theme changes. Chromium launch was attempted and denied by macOS `bootstrap_check_in`; these interaction and screenshot checks did not run.
+- Docker rebuild was attempted and denied while updating the Buildx activity file. HTTP startup on `127.0.0.1:3001` was attempted and denied with `EPERM`. Live HTTP, current Docker image execution/bind-mount output, and browser acceptance remain outstanding; in-process checks do not certify them.
+- No protected branch merge, version bump, release tag, or push was performed.
+
 ## Remaining acceptance checks
 
 On a machine/session with Docker and browser access:

@@ -4,7 +4,8 @@ import { createElement, isValidElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import Home from "../app/page";
 import { ResultSummary } from "../components/result-summary";
-import type { ImageFormat, SelectedImage } from "../lib/types";
+import { ImageList } from "../components/image-list";
+import type { ImageFormat, ResizeSettingsValue, SelectedImage } from "../lib/types";
 
 function findDownload(node: ReactNode): { onClick: () => void; disabled: boolean } | undefined {
   if (Array.isArray(node)) return node.map(findDownload).find(Boolean);
@@ -45,4 +46,18 @@ test("mixed-format multiple outputs use ZIP and no-success batches disable downl
     assert.equal(control.disabled, images.length === 0);
     if (images.length) { assert.match(renderToStaticMarkup(tree), /Download All ZIP/); control.onClick(); assert.equal(invoked, true); assert.equal(requested, undefined); }
   }
+});
+
+test("individual resize editors associate unique controls and values with their image rows", () => {
+  const defaults: ResizeSettingsValue = { enabled: true, method: "pixels", width: "800", height: "", percent: "50" };
+  const images = [completed("jpg", "jpeg"), { ...completed("png", "png"), resizeSettings: { ...defaults, method: "percent" as const, percent: "30" } }].map(image => ({ ...image, preview: "/fixture.png" }));
+  const props = { images, disabled: false, onRemove: () => {}, onClear: () => {}, onDownload: () => {}, downloading: null, resizeIndividual: true, resizeDefaults: defaults, resizeErrors: new Map<string, string>(), onResizeChange: () => {} };
+  const html = renderToStaticMarkup(createElement(ImageList, props));
+  assert.match(html, /aria-label="Resize photo.jpg"/); assert.match(html, /aria-label="Resize photo.png"/);
+  assert.match(html, /id="resize-jpg-width"[^>]*value="800"/);
+  assert.match(html, /id="resize-png-percent"[^>]*value="30"/);
+  assert.match(html, /50% means half the original width and height/);
+  const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]);
+  assert.equal(new Set(ids).size, ids.length, "Controls must not share DOM IDs between images");
+  assert.doesNotMatch(renderToStaticMarkup(createElement(ImageList, { ...props, resizeIndividual: false })), /resize-jpg-width|resize-png-percent/);
 });

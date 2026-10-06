@@ -8,6 +8,7 @@ import { ConversionQueue } from "../lib/queue";
 import { safeBaseName, reserveOutput, validateInput, openOutput } from "../lib/file-utils";
 import { createBatch, getBatch } from "../lib/batches";
 import { config, initializeStorage } from "../lib/config";
+import { parseResizeOptions, resizeDimensions, resizeFromSettings } from "../lib/resize";
 
 test("queue limits concurrency and recovers after a rejected task", async () => {
   const queue = new ConversionQueue(4); let active = 0; let maximum = 0; let count = 0;
@@ -107,4 +108,29 @@ test("original-format output reserves safe names and never overwrites matching i
     await symlink(path.join(directory, "photo.png"), path.join(directory, "linked.png"));
     await assert.rejects(() => openOutput(directory, "linked.png"));
   } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("percentage resizing rejects ambiguous or invalid settings and rounds to at least one pixel", () => {
+  for (const percent of [0, 101, 20.5, "50", null, NaN, Infinity]) assert.throws(() => parseResizeOptions({ percent }), /percentage/);
+  assert.throws(() => parseResizeOptions({ percent: 50, width: 100 }), /either/);
+  assert.throws(() => parseResizeOptions({ percent: 50, height: 100 }), /either/);
+  for (const percent of [20, 30, 40, 50, 60, 70, 80, 100]) assert.deepEqual(resizeDimensions(parseResizeOptions({ percent })!, 1000, 500), { width: percent * 10, height: percent * 5 });
+  assert.deepEqual(resizeDimensions({ percent: 1 }, 1, 2), { width: 1, height: 1 });
+  assert.deepEqual(resizeDimensions({ percent: 50 }, 101, 67), { width: 51, height: 34 });
+  const fields = { enabled: true, method: "percent" as const, percent: "30", width: "invalid", height: "" };
+  assert.deepEqual(resizeFromSettings(fields), { percent: 30 }, "Inactive pixel fields must be ignored");
+  assert.throws(() => resizeFromSettings({ ...fields, percent: "" }), /percentage/);
+});
+
+test("per-image resize overrides batch defaults, validates each file, and snapshots request values", () => {
+  const file = { name: "photo.jpg", mime: "image/jpeg", size: 10 };
+  const individual = { percent: 30 };
+  const body = { files: [{ ...file, resize: individual }, { ...file, resize: { width: 200 } }, file], quality: 80, lossless: false, resize: { percent: 50 }, outputFormat: "original" };
+  const batch = createBatch(body);
+  individual.percent = 0;
+  assert.deepEqual(batch.files.map(image => image.resize), [{ percent: 30 }, { width: 200, height: undefined }, { percent: 50 }]);
+  const independent = createBatch({ ...body, resize: undefined, files: [{ ...file, resize: { percent: 20 } }] });
+  assert.deepEqual(independent.files[0].resize, { percent: 20 });
+  assert.throws(() => createBatch({ ...body, files: [{ ...file, resize: { percent: 0 } }] }), /percentage/);
+  assert.throws(() => createBatch({ ...body, resize: undefined, files: [file] }), /resize dimensions/);
 });
