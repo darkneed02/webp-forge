@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
-export const metadata: Metadata = { title: "WebP Forge — Local image tools", description: "Resize JPG and PNG in their original format, or convert images to WebP on your own machine.", icons: { icon: "/favicon.svg" } };
+import { withBasePath } from "@/lib/base-path";
+export const metadata: Metadata = { title: "WebP Forge — Local image tools", description: "Resize JPG and PNG in their original format, or convert images to WebP on your own machine.", icons: { icon: withBasePath("/favicon.svg") } };
 export const viewport: Viewport = {
   colorScheme: "light dark",
   themeColor: [

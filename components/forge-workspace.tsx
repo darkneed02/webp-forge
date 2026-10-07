@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ConversionOptions, ConversionResult, OutputFormat, PublicConfig, ResizeOptions, ResizeScope, SelectedImage, TaskMode } from "@/lib/types";
 import { resizeFromSettings } from "@/lib/resize";
+import { withBasePath } from "@/lib/base-path";
 import { DropZone } from "./drop-zone";
 import { ImageList } from "./image-list";
 import { QualitySelector, type Preset } from "./quality-selector";
@@ -90,7 +91,7 @@ export function ForgeWorkspace({ config, mode }: { config: PublicConfig; mode: T
     setImages(previous => previous.map(image => ({ ...image, status: "Waiting", result: undefined, error: undefined })));
     const controller = new AbortController(); controllers.current.add(controller);
     try {
-      const batch = await responseJson<{ batchId: string; fileIds: string[] }>(await fetch("/api/batches", {
+      const batch = await responseJson<{ batchId: string; fileIds: string[] }>(await fetch(withBasePath("/api/batches"), {
         method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
         body: JSON.stringify({ ...options, outputFormat, resize: resizeOptions, files: images.map(image => ({ name: image.file.name, size: image.file.size, mime: image.file.type || (image.file.name.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg"), resize: resizeActive && resizeScope === "individual" ? imageResizeOptions.get(image.id) : undefined })) })
       }));
@@ -101,7 +102,7 @@ export function ForgeWorkspace({ config, mode }: { config: PublicConfig; mode: T
         while (next < images.length && !controller.signal.aborted) {
           const index = next++; const image = images[index]; update(image.id, { status: "Processing" });
           try {
-            const result = await responseJson<ConversionResult>(await fetch(`/api/convert?batch=${batch.batchId}&id=${batch.fileIds[index]}`, {
+            const result = await responseJson<ConversionResult>(await fetch(withBasePath(`/api/convert?batch=${batch.batchId}&id=${batch.fileIds[index]}`), {
               method: "POST", headers: { "Content-Type": image.file.type || (image.file.name.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg") }, body: image.file, signal: controller.signal
             }));
             update(image.id, { status: "Completed", result });
@@ -119,7 +120,7 @@ export function ForgeWorkspace({ config, mode }: { config: PublicConfig; mode: T
     if (!batchId || downloading) return;
     setDownloading(image?.id ?? "zip"); setError(null);
     try {
-      const response = await fetch(image ? `/api/download?batch=${batchId}&id=${image.result!.id}` : `/api/zip?batch=${batchId}`);
+      const response = await fetch(withBasePath(image ? `/api/download?batch=${batchId}&id=${image.result!.id}` : `/api/zip?batch=${batchId}`));
       if (!response.ok) { const body = await response.json(); throw new Error(body.error || "Download failed."); }
       const url = URL.createObjectURL(await response.blob());
       const link = document.createElement("a"); link.href = url; link.download = image?.result?.filename ?? "webp-forge.zip";

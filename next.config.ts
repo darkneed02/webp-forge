@@ -1,6 +1,10 @@
 import type { NextConfig } from "next";
+import { normalizeBasePath } from "./lib/base-path";
+const basePath = normalizeBasePath(process.env.BASE_PATH);
 const config: NextConfig = {
   output: "standalone",
+  basePath,
+  env: { NEXT_PUBLIC_BASE_PATH: basePath },
   serverExternalPackages: ["sharp"],
   poweredByHeader: false,
   async headers() {

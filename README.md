@@ -68,8 +68,19 @@ Values are validated when the Node application starts. Invalid integers, empty p
 | `CONVERSION_CONCURRENCY` | `4` | Integer 1–32; global queue limit |
 | `HOST_OUTPUT_DIR` | `./output` | Compose host bind mount source |
 | `HOST_PORT` | `3000` | Compose host listening port |
+| `BASE_PATH` | empty | Build-time sub-path such as `/webp-forge` for serving behind a reverse proxy; rebuild the image after changing it |
 
 `WEBP_QUALITY` supplies the initial setting; users can choose another quality in the UI. Raising concurrency increases memory use. The pixel limit protects against very large decoded images independently of the upload byte limit.
+
+## Serving under a sub-path
+
+To share one domain with another site, set `BASE_PATH=/webp-forge` in `.env` and rebuild with `docker compose up -d --build`. Pages, assets, API calls and the container health check all move under that prefix, e.g. `http://127.0.0.1:3000/webp-forge/api/health`. Proxy the prefix through unchanged and keep the original `Host` header, because uploads are rejected when `Origin` and `Host` differ. Apache example:
+
+```apache
+ProxyPreserveHost On
+ProxyPass        /webp-forge http://127.0.0.1:3000/webp-forge
+ProxyPassReverse /webp-forge http://127.0.0.1:3000/webp-forge
+```
 
 ## Local development
 

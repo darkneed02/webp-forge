@@ -90,3 +90,12 @@ TEST_OUTPUT_DIR=./output npm run test:browser
 ```
 
 Use the configured host output path and `TEST_BASE_URL` if different from the defaults. The tests create their own fixtures and remove their own generated outputs after verification.
+
+## Sub-path (BASE_PATH) update
+
+Checked on 2026-10-07 on branch `feature/base-path`:
+
+- TypeScript, lint, all 20 unit tests (including new `tests/base-path.test.ts`), in-process API acceptance, and `BASE_PATH=/webp-forge npm run build` passed.
+- Live HTTP against the standalone build on `127.0.0.1:3199` with `BASE_PATH=/webp-forge`: `/webp-forge`, `/webp-forge/convert` and `/webp-forge/api/health` returned 200, `/` returned 404, and every page `href`/`src` (assets, favicon, links) carried the prefix.
+- `TEST_BASE_URL=http://127.0.0.1:3199/webp-forge npm run test:integration` passed over real HTTP.
+- Docker build with the `BASE_PATH` build argument and the reverse-proxy setup are checked on the deployment server, not in this workspace.

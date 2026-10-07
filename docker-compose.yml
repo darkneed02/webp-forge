@@ -1,6 +1,9 @@
 services:
   webp-forge:
-    build: .
+    build:
+      context: .
+      args:
+        BASE_PATH: ${BASE_PATH:-}
     init: true
     ports:
       - "127.0.0.1:${HOST_PORT:-3000}:3000"
