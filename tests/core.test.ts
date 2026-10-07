@@ -58,7 +58,7 @@ test("startup creates missing storage and cleans only application-owned abandone
   } finally { Object.assign(config, previous); await rm(root, { recursive: true, force: true }); }
 });
 test("invalid environment values and overlapping directories fail configuration loading", () => {
-  for (const values of [{ WEBP_QUALITY: "NaN" }, { CONVERSION_CONCURRENCY: "0" }, { MAX_FILES: "" }, { MAX_UPLOAD_MB: "-1" }, { OUTPUT_DIR: "" }, { OUTPUT_DIR: "same", UPLOAD_DIR: "same" }]) {
+  for (const values of [{ WEBP_QUALITY: "NaN" }, { CONVERSION_CONCURRENCY: "0" }, { MAX_INPUT_MEGAPIXELS: "0" }, { MAX_INPUT_MEGAPIXELS: "269" }, { MAX_FILES: "" }, { MAX_UPLOAD_MB: "-1" }, { OUTPUT_DIR: "" }, { OUTPUT_DIR: "same", UPLOAD_DIR: "same" }]) {
     const result = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", "await import('./lib/config.ts')"], { env: { ...process.env, ...values }, encoding: "utf8" });
     assert.notEqual(result.status, 0, JSON.stringify(values));
     assert.match(result.stderr, /must be|must be different/);

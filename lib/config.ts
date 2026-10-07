@@ -20,6 +20,7 @@ export const config = {
   uploadDir: directory("UPLOAD_DIR", "data/uploads"),
   quality: integer("WEBP_QUALITY", 80, 1, 100),
   maxUploadMB: integer("MAX_UPLOAD_MB", 30, 1, 500),
+  maxInputMegapixels: integer("MAX_INPUT_MEGAPIXELS", 40, 1, 268),
   maxFiles: integer("MAX_FILES", 100, 1, 1000),
   concurrency: integer("CONVERSION_CONCURRENCY", 4, 1, 32),
 };

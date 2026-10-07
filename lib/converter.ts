@@ -19,7 +19,7 @@ export async function convertImage(input: string, name: string, mime: string, op
   const outputFormat = parseOutputFormat(options.outputFormat);
   if (outputFormat === "original" && !resize) throw new AppError("Enter resize dimensions when keeping the original format.");
   const target = resolveOutputFormat(name, format, outputFormat);
-  const image = sharp(input, { limitInputPixels: 40_000_000, failOn: "warning" });
+  const image = sharp(input, { limitInputPixels: config.maxInputMegapixels * 1_000_000, failOn: "warning" });
   let originalWidth: number; let originalHeight: number;
   try {
     const metadata = await image.metadata();
@@ -29,7 +29,7 @@ export async function convertImage(input: string, name: string, mime: string, op
     const rotated = (metadata.orientation ?? 1) >= 5 && (metadata.orientation ?? 1) <= 8;
     originalWidth = rotated ? metadata.height : metadata.width;
     originalHeight = rotated ? metadata.width : metadata.height;
-  } catch (error) { if (error instanceof AppError) throw error; throw new AppError("This image is corrupted or exceeds the 40-megapixel limit."); }
+  } catch (error) { if (error instanceof AppError) throw error; throw new AppError(`This image is corrupted or exceeds the ${config.maxInputMegapixels}-megapixel limit.`); }
   const output = await reserveOutput(config.outputDir, name, target.extension);
   try {
     image.rotate();

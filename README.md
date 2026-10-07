@@ -14,7 +14,7 @@ Fast batch image processing for the web. A local Next.js application that resize
 - The results download button saves the output image directly when one image succeeds, or one ZIP when multiple images succeed.
 - PNG transparency, automatic EXIF orientation, and metadata removal.
 - Batch or per-image resizing by pixel bounds or percentage, with 20–80% presets, preserving proportions without cropping or enlargement. Results show original and output dimensions.
-- Validated file extension, MIME type, decoded image format, file count, upload byte count, and a 40-megapixel decoded image limit. Animated PNG is rejected in V1.
+- Validated file extension, MIME type, decoded image format, file count, upload byte count, and a decoded image limit of 40 megapixels by default (`MAX_INPUT_MEGAPIXELS`). Animated PNG is rejected in V1.
 
 ## Requirements
 
@@ -64,6 +64,7 @@ Values are validated when the Node application starts. Invalid integers, empty p
 | `UPLOAD_DIR` | `/app/data/uploads` in Docker; `data/uploads` locally | Temporary upload directory |
 | `WEBP_QUALITY` | `80` | Integer 1–100; initial UI quality |
 | `MAX_UPLOAD_MB` | `30` | Integer 1–500; binary MB per image |
+| `MAX_INPUT_MEGAPIXELS` | `40` | Integer 1–268; largest decoded image in millions of pixels. Each megapixel needs roughly 3–4 MB of RAM per image being processed, multiplied by `CONVERSION_CONCURRENCY` |
 | `MAX_FILES` | `100` | Integer 1–1000 per batch |
 | `CONVERSION_CONCURRENCY` | `4` | Integer 1–32; global queue limit |
 | `HOST_OUTPUT_DIR` | `./output` | Compose host bind mount source |
@@ -189,7 +190,7 @@ Savings compare successfully processed inputs with their outputs; failed images 
 - **Permission denied on output:** verify that the host folder is writable and shared with Docker Desktop. On Linux, the container's Node UID is 1000. For restrictive NAS/root-squashed mounts, set appropriate ownership or ACLs yourself and run the container with a matching `user` after preparing both directories. Do not grant world-writable permissions as a blanket fix.
 - **Application fails at startup:** check `docker compose logs webp-forge` for invalid environment settings or inaccessible storage. Missing directories are created automatically where permissions allow.
 - **Sharp installation fails:** use supported Node 22 and install dependencies on the target platform. For Docker, rebuild without host dependencies: `docker compose build --no-cache`.
-- **Image fails to convert:** check its extension, actual format, 30 MB default size limit, and 40-megapixel decoded limit. Corrupted images and animated PNG files are rejected; other images in the batch continue.
+- **Image fails to convert:** check its extension, actual format, 30 MB default size limit, and decoded pixel limit (`MAX_INPUT_MEGAPIXELS`, 40 MP by default). Corrupted images and animated PNG files are rejected; other images in the batch continue.
 - **Disk or temporary space is full:** free host output space, lower concurrency, or increase the tmpfs size in Compose when raising upload limits.
 - **ZIP or download fails:** ensure the host output files still exist. Retry the download after transient failures. If the app restarted or the session expired, retrieve files from the host folder or convert again.
 - **Local development tries to write `/app`:** override Docker environment paths in `.env.local` with repository-relative paths.

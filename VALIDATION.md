@@ -99,3 +99,9 @@ Checked on 2026-10-07 on branch `feature/base-path`:
 - Live HTTP against the standalone build on `127.0.0.1:3199` with `BASE_PATH=/webp-forge`: `/webp-forge`, `/webp-forge/convert` and `/webp-forge/api/health` returned 200, `/` returned 404, and every page `href`/`src` (assets, favicon, links) carried the prefix.
 - `TEST_BASE_URL=http://127.0.0.1:3199/webp-forge npm run test:integration` passed over real HTTP.
 - Docker build with the `BASE_PATH` build argument and the reverse-proxy setup are checked on the deployment server, not in this workspace.
+
+## Configurable pixel limit (MAX_INPUT_MEGAPIXELS)
+
+Checked on 2026-10-07 on branch `feature/base-path`. A staff upload of an 8192 × 5464 JPEG (44.8 MP) was rejected by the fixed 40-megapixel limit, so the limit is now `MAX_INPUT_MEGAPIXELS` (default 40, range 1–268).
+
+- TypeScript, lint, 21 unit tests (new `tests/pixel-limit.test.ts` converts 1200 × 1000 in fresh processes: rejected at 1 MP with the limit named in the error, accepted at 2 MP; out-of-range values fail configuration), in-process API acceptance, and `BASE_PATH=/webp-forge npm run build` passed.
