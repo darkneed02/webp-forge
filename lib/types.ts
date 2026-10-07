@@ -1,5 +1,12 @@
 export type ImageStatus = "Ready" | "Waiting" | "Processing" | "Completed" | "Failed";
-export type ConversionOptions = { quality: number; lossless: boolean };
-export type ConversionResult = { filename: string; originalSize: number; outputSize: number; id: string };
-export type SelectedImage = { id: string; file: File; preview: string; status: ImageStatus; error?: string; result?: ConversionResult };
+export type ResizeOptions = { width?: number; height?: number; percent?: number };
+export type ResizeSettingsValue = { enabled: boolean; method: "pixels" | "percent"; width: string; height: string; percent: string };
+export type ResizeScope = "batch" | "individual";
+export type TaskMode = "resize" | "convert";
+export type OutputFormat = "original" | "webp";
+export type ImageFormat = "jpeg" | "png" | "webp";
+export type OutputExtension = "jpg" | "jpeg" | "png" | "webp";
+export type ConversionOptions = { quality: number; lossless: boolean; resize?: ResizeOptions; outputFormat?: OutputFormat };
+export type ConversionResult = { filename: string; originalSize: number; outputSize: number; id: string; originalWidth: number; originalHeight: number; width: number; height: number; format: ImageFormat };
+export type SelectedImage = { id: string; file: File; preview: string; status: ImageStatus; error?: string; result?: ConversionResult; resizeSettings?: ResizeSettingsValue };
 export type PublicConfig = { quality: number; maxUploadMB: number; maxFiles: number; concurrency: number };
